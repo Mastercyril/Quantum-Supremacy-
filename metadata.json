@@ -1,0 +1,6 @@
+{
+  "name": "Cyril-QAI",
+  "description": "Quantum self-evolving AI terminal assistant with OpenAI, local MCP memory indexer, and real-time website search tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
