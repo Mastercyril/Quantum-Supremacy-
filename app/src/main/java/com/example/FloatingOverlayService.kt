@@ -61,10 +61,16 @@ import com.example.ui.theme.*
 
 class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
+    private var tts: android.speech.tts.TextToSpeech? = null
+
     // Lifecycle Management for Jetpack Compose
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val store = ViewModelStore()
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
+
+    init {
+        savedStateRegistryController.performAttach()
+    }
 
     override val lifecycle: Lifecycle = lifecycleRegistry
     override val viewModelStore: ViewModelStore = store
@@ -103,8 +109,14 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
 
     override fun onCreate() {
         super.onCreate()
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         savedStateRegistryController.performRestore(null)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+
+        tts = android.speech.tts.TextToSpeech(this) { status ->
+            if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                tts?.language = java.util.Locale.US
+            }
+        }
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
@@ -454,14 +466,31 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(if (isUser) CyberGray else CyberSurfaceVariant)
+                                .clickable {
+                                    if (!isUser) {
+                                        tts?.speak(msg.content, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, null)
+                                    }
+                                }
                                 .padding(6.dp)
                         ) {
-                            Text(
-                                text = msg.content,
-                                color = if (isUser) CyberWhite else CyberCyan,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = msg.content,
+                                    color = if (isUser) CyberWhite else CyberCyan,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (!isUser) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "🔊",
+                                        color = CyberCyan,
+                                        fontSize = 8.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -962,19 +991,36 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
             // Output Terminal
             if (autopilotOutput.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "AUTOPILOT COGNITIVE LOGSTREAM",
-                    color = CyberGreen,
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "AUTOPILOT COGNITIVE LOGSTREAM",
+                        color = CyberGreen,
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "🔊 READ ALOUD",
+                        color = CyberCyan,
+                        fontSize = 7.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable { tts?.speak(autopilotOutput, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, null) }
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
                 Spacer(modifier = Modifier.height(2.dp))
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(CyberBlack)
                         .border(0.5.dp, CyberGreen.copy(alpha = 0.3f))
+                        .clickable { tts?.speak(autopilotOutput, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, null) }
                         .padding(5.dp)
                         .heightIn(max = 140.dp)
                 ) {
@@ -1037,6 +1083,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
     }
 
     override fun onDestroy() {
+        tts?.shutdown()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         composeView?.let {

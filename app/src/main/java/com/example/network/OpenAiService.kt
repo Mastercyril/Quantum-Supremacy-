@@ -1,8 +1,15 @@
 package com.example.network
 
 import com.squareup.moshi.JsonClass
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
+import org.json.JSONArray
+import org.json.JSONObject
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.Body
@@ -63,4 +70,67 @@ object OpenAiClient {
         .client(httpClient)
         .build()
         .create(OpenAiApi::class.java)
+
+    fun streamChatCompletions(
+        apiKey: String,
+        model: String,
+        messages: List<MessageDto>
+    ): Flow<String> = flow {
+        val json = JSONObject()
+        json.put("model", model)
+        val messagesArray = JSONArray()
+        for (msg in messages) {
+            val msgObj = JSONObject()
+            msgObj.put("role", msg.role)
+            msgObj.put("content", msg.content)
+            messagesArray.put(msgObj)
+        }
+        json.put("messages", messagesArray)
+        json.put("temperature", 0.85)
+        json.put("max_tokens", 2048)
+        json.put("stream", true)
+
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val requestBody = json.toString().toRequestBody(mediaType)
+        val request = Request.Builder()
+            .url("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", "Bearer $apiKey")
+            .post(requestBody)
+            .build()
+
+        val streamClient = httpClient.newBuilder()
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+            .build()
+
+        streamClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val errorMsg = response.body?.string() ?: ""
+                throw Exception("OpenAI API streaming error: Code ${response.code}, Message: $errorMsg")
+            }
+            val source = response.body?.source() ?: throw Exception("Response body source is null")
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                if (line.startsWith("data: ")) {
+                    val data = line.substring(6).trim()
+                    if (data == "[DONE]") {
+                        break
+                    }
+                    try {
+                        val chunkJson = JSONObject(data)
+                        val choices = chunkJson.optJSONArray("choices")
+                        if (choices != null && choices.length() > 0) {
+                            val choice = choices.getJSONObject(0)
+                            val delta = choice.optJSONObject("delta")
+                            val content = delta?.optString("content") ?: ""
+                            if (content.isNotEmpty()) {
+                                emit(content)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // Ignore standard deserialization or blank-line anomalies
+                    }
+                }
+            }
+        }
+    }
 }

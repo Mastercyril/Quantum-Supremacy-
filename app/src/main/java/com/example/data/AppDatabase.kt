@@ -35,7 +35,7 @@ interface ChatMessageDao {
     fun getAllMessages(): Flow<List<ChatMessage>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertMessage(message: ChatMessage)
+    suspend fun insertMessage(message: ChatMessage): Long
 
     @Query("DELETE FROM chat_messages")
     suspend fun clearHistory()

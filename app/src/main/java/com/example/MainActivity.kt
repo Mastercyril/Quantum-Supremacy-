@@ -58,15 +58,27 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.AnnotatedString
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
+    private var tts: android.speech.tts.TextToSpeech? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        tts = android.speech.tts.TextToSpeech(this) { status ->
+            if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                tts?.language = java.util.Locale.US
+            }
+        }
+
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -78,18 +90,27 @@ class MainActivity : ComponentActivity() {
                 ) { innerPadding ->
                     MainScreen(
                         viewModel = viewModel,
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier.padding(innerPadding),
+                        onSpeakText = { text ->
+                            tts?.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, null)
+                        }
                     )
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        tts?.shutdown()
+        super.onDestroy()
     }
 }
 
 @Composable
 fun MainScreen(
     viewModel: MainViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onSpeakText: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     var activeTab by remember { mutableStateOf("console") } // "console", "wallet", "vault", "config"
@@ -225,7 +246,8 @@ fun MainScreen(
                                 onSendMessage = { text, search ->
                                     viewModel.sendMessage(text, search)
                                 },
-                                onClearChat = { viewModel.clearChatHistory() }
+                                onClearChat = { viewModel.clearChatHistory() },
+                                onSpeakText = onSpeakText
                             )
                         }
                         "wallet" -> {
@@ -721,7 +743,8 @@ fun ConsoleTabWorkspace(
     isGenerating: Boolean,
     isSearchingWeb: Boolean,
     onSendMessage: (String, Boolean) -> Unit,
-    onClearChat: () -> Unit
+    onClearChat: () -> Unit,
+    onSpeakText: (String) -> Unit = {}
 ) {
     var rawInputText by remember { mutableStateOf("") }
     var webSearchEnabled by remember { mutableStateOf(false) }
@@ -897,9 +920,9 @@ fun ConsoleTabWorkspace(
                                 msg.role != "user" &&
                                 index == messages.indexOfLast { it.role != "user" }
                         if (isRetroShellMode) {
-                            TerminalLineElement(message = msg, animate = isLatestAssistant)
+                            TerminalLineElement(message = msg, animate = isLatestAssistant, onSpeakText = onSpeakText)
                         } else {
-                            ChatBubbleElement(message = msg, animate = isLatestAssistant)
+                            ChatBubbleElement(message = msg, animate = isLatestAssistant, onSpeakText = onSpeakText)
                         }
                     }
                     if (isGenerating) {
@@ -1027,6 +1050,52 @@ fun ConsoleTabWorkspace(
                             fontWeight = FontWeight.Bold
                         )
                     }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Quick Shell Command Suggestion Chips
+        val suggestionChips = listOf(
+            "/mcp_help",
+            "/mcp_list",
+            "/memo Save current chat | kotlin, general",
+            "Explain Kotlin Coroutines",
+            "How to use Room Database",
+            "Analyze System logs"
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            suggestionChips.forEach { suggestion ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(CyberSurfaceVariant.copy(alpha = 0.5f))
+                        .border(
+                            0.5.dp,
+                            CyberTealMuted.copy(alpha = 0.3f),
+                            RoundedCornerShape(4.dp)
+                        )
+                        .clickable {
+                            rawInputText = suggestion
+                            historyIndex = -1
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = suggestion,
+                        color = CyberTealMuted,
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
@@ -1193,7 +1262,7 @@ fun ConsoleTabWorkspace(
 }
 
 @Composable
-fun ChatBubbleElement(message: ChatMessage, animate: Boolean = false) {
+fun ChatBubbleElement(message: ChatMessage, animate: Boolean = false, onSpeakText: (String) -> Unit = {}) {
     val isUser = message.role == "user"
     val alignment = if (isUser) Alignment.End else Alignment.Start
     val bgColors = if (isUser) {
@@ -1231,39 +1300,54 @@ fun ChatBubbleElement(message: ChatMessage, animate: Boolean = false) {
                         bottomEnd = if (isUser) 2.dp else 8.dp
                     )
                 )
+                .clickable {
+                    if (!isUser) {
+                        onSpeakText(message.content)
+                    }
+                }
                 .padding(10.dp)
         ) {
             Column {
-                Text(
-                    text = if (isUser) "COMMAND LINE ENTRY" else "Q GENESIS ULTIMATE OUTPUT",
-                    color = if (isUser) CyberPurple else CyberCyan,
-                    fontSize = 7.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 3.dp)
-                )
-                
-                if (isUser || !animate) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = message.content,
-                        color = CyberWhite,
-                        fontSize = 11.sp,
+                        text = if (isUser) "COMMAND LINE ENTRY" else "Q GENESIS ULTIMATE OUTPUT",
+                        color = if (isUser) CyberPurple else CyberCyan,
+                        fontSize = 7.sp,
                         fontFamily = FontFamily.Monospace,
-                        lineHeight = 15.sp
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 3.dp).weight(1f)
                     )
-                } else {
-                    AnimatedTerminalText(
-                        text = message.content,
-                        speedMs = 12
-                    )
+                    if (!isUser) {
+                        Text(
+                            text = "🔊 SPEAK",
+                            color = CyberCyan,
+                            fontSize = 7.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { onSpeakText(message.content) }
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
                 }
+                
+                SyntaxHighlightedMarkdownMessage(
+                    text = message.content,
+                    defaultColor = if (isUser) CyberWhite else CyberTealMuted,
+                    animate = !isUser && animate,
+                    speedMs = 12
+                )
             }
         }
     }
 }
 
 @Composable
-fun TerminalLineElement(message: ChatMessage, animate: Boolean = false) {
+fun TerminalLineElement(message: ChatMessage, animate: Boolean = false, onSpeakText: (String) -> Unit = {}) {
     val isUser = message.role == "user"
     Column(
         modifier = Modifier
@@ -1279,40 +1363,46 @@ fun TerminalLineElement(message: ChatMessage, animate: Boolean = false) {
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold
                 )
-                Text(
-                    text = message.content,
-                    color = CyberWhite,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    lineHeight = 15.sp
-                )
+                Box(modifier = Modifier.weight(1f)) {
+                    SyntaxHighlightedMarkdownMessage(
+                        text = message.content,
+                        defaultColor = CyberWhite,
+                        animate = false
+                    )
+                }
             }
         } else {
             Column {
-                Text(
-                    text = "[Q_SYS_OUTPUT] -----------------------------",
-                    color = CyberCyan.copy(alpha = 0.4f),
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 2.dp)
-                )
-                if (!animate) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = message.content,
-                        color = CyberCyan,
-                        fontSize = 11.sp,
+                        text = "[Q_SYS_OUTPUT] -----------------------------",
+                        color = CyberCyan.copy(alpha = 0.4f),
+                        fontSize = 8.sp,
                         fontFamily = FontFamily.Monospace,
-                        lineHeight = 15.sp
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 2.dp).weight(1f)
                     )
-                } else {
-                    AnimatedTerminalText(
-                        text = message.content,
-                        speedMs = 12,
+                    Text(
+                        text = "[🔊 SPEAK]",
                         color = CyberCyan,
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
                         modifier = Modifier
+                            .clickable { onSpeakText(message.content) }
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
                     )
                 }
+                SyntaxHighlightedMarkdownMessage(
+                    text = message.content,
+                    defaultColor = CyberCyan,
+                    animate = animate,
+                    speedMs = 12
+                )
                 Spacer(modifier = Modifier.height(4.dp))
             }
         }
@@ -1374,6 +1464,284 @@ fun AnimatedTerminalText(
         lineHeight = 15.sp,
         modifier = modifier
     )
+}
+
+sealed class BlockSegment {
+    data class TextBlock(val text: String) : BlockSegment()
+    data class CodeBlock(val language: String, val code: String) : BlockSegment()
+}
+
+fun parseMarkdownToBlocks(content: String): List<BlockSegment> {
+    val segments = mutableListOf<BlockSegment>()
+    val lines = content.split("\n")
+    var isInsideCode = false
+    var currentLanguage = ""
+    val currentCodeLines = mutableListOf<String>()
+    val currentTextLines = mutableListOf<String>()
+    
+    for (line in lines) {
+        if (line.trim().startsWith("```")) {
+            if (isInsideCode) {
+                segments.add(BlockSegment.CodeBlock(currentLanguage, currentCodeLines.joinToString("\n")))
+                currentCodeLines.clear()
+                isInsideCode = false
+            } else {
+                if (currentTextLines.isNotEmpty()) {
+                    segments.add(BlockSegment.TextBlock(currentTextLines.joinToString("\n")))
+                    currentTextLines.clear()
+                }
+                currentLanguage = line.trim().substring(3).trim()
+                if (currentLanguage.isEmpty()) {
+                    currentLanguage = "code"
+                }
+                isInsideCode = true
+            }
+        } else {
+            if (isInsideCode) {
+                currentCodeLines.add(line)
+            } else {
+                currentTextLines.add(line)
+            }
+        }
+    }
+    
+    if (isInsideCode) {
+        segments.add(BlockSegment.CodeBlock(currentLanguage, currentCodeLines.joinToString("\n")))
+    } else if (currentTextLines.isNotEmpty()) {
+        segments.add(BlockSegment.TextBlock(currentTextLines.joinToString("\n")))
+    }
+    
+    return segments
+}
+
+fun buildSyntaxHighlightedText(content: String, defaultColor: Color): AnnotatedString {
+    return buildAnnotatedString {
+        append(content)
+        
+        val commentRegex = Regex("(//.*)|(/\\*([^*]|\\*+[^*/])*\\*+/)|(#.*)")
+        val stringRegex = Regex("\"[^\"]*\"|'[^']*'")
+        val numberRegex = Regex("\\b\\d+(?:\\.\\d+)?\\b")
+        val annotationRegex = Regex("@[a-zA-Z_][a-zA-Z0-9_]*")
+        
+        val keywords = setOf(
+            "fun", "val", "var", "class", "interface", "import", "package", 
+            "return", "if", "else", "while", "for", "in", "null", "true", "false", 
+            "try", "catch", "throw", "override", "private", "public", "protected", 
+            "suspend", "object", "const", "def", "let", "function", "lambda", "assert",
+            "break", "continue", "do", "finally", "from", "as", "is", "when", "async", "await", "yield"
+        )
+        val keywordRegex = Regex("\\b(" + keywords.joinToString("|") + ")\\b")
+        
+        val systemTags = setOf(
+            "guest@qsys", "[Q_SYS_OUTPUT]", "Q GENESIS ULTIMATE OUTPUT", "COMMAND LINE ENTRY",
+            "COGNITIVE ENTANGLED SYNAPSES STATUS", "SYSTEM RECEPTACLE LEVEL", "MCP LOCAL VAULT STORAGE INDEX",
+            "CONNECTED", "OPTIMAL", "OPEN", "INFO", "WARN", "ERROR", "GOOD", "EXEC", "AUTOPILOT COGNITIVE LOGSTREAM"
+        )
+        val systemTagRegex = Regex("\\b(" + systemTags.map { Regex.escape(it) }.joinToString("|") + ")\\b")
+
+        addStyle(SpanStyle(color = defaultColor), 0, content.length)
+        
+        systemTagRegex.findAll(content).forEach { match ->
+            val color = when (match.value) {
+                "CONNECTED", "OPTIMAL", "OPEN", "GOOD" -> CyberGreen
+                "WARN", "ERROR" -> CyberRed
+                else -> CyberCyan
+            }
+            addStyle(SpanStyle(color = color, fontWeight = FontWeight.Bold), match.range.first, match.range.last + 1)
+        }
+
+        numberRegex.findAll(content).forEach { match ->
+            addStyle(SpanStyle(color = CyberGold), match.range.first, match.range.last + 1)
+        }
+        
+        annotationRegex.findAll(content).forEach { match ->
+            addStyle(SpanStyle(color = CyberPurple), match.range.first, match.range.last + 1)
+        }
+
+        keywordRegex.findAll(content).forEach { match ->
+            addStyle(SpanStyle(color = CyberPurple, fontWeight = FontWeight.Bold), match.range.first, match.range.last + 1)
+        }
+
+        stringRegex.findAll(content).forEach { match ->
+            addStyle(SpanStyle(color = CyberTealMuted), match.range.first, match.range.last + 1)
+        }
+
+        commentRegex.findAll(content).forEach { match ->
+            addStyle(SpanStyle(color = Color(0xFF628A62)), match.range.first, match.range.last + 1)
+        }
+    }
+}
+
+@Composable
+fun CodeBlockTerminal(language: String, code: String, defaultColor: Color) {
+    val clipboardManager = LocalClipboardManager.current
+    var isCopied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isCopied) {
+        if (isCopied) {
+            kotlinx.coroutines.delay(2000)
+            isCopied = false
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(CyberSurfaceVariant)
+            .border(0.5.dp, CyberCyan.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(CyberSurface)
+                .drawBehind {
+                    drawLine(
+                        color = CyberCyan.copy(alpha = 0.15f),
+                        start = Offset(0f, size.height),
+                        end = Offset(size.width, size.height),
+                        strokeWidth = 1.dp.toPx()
+                    )
+                }
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(modifier = Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(CyberRed))
+                Box(modifier = Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(CyberGold))
+                Box(modifier = Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(CyberGreen))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "▶ ${language.uppercase(Locale.ROOT)} BUFFER",
+                    color = CyberCyan,
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            Box(
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clickable {
+                        clipboardManager.setText(AnnotatedString(code))
+                        isCopied = true
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (isCopied) "✔ COPIED" else "⎘ COPY",
+                    color = if (isCopied) CyberGreen else CyberTealMuted,
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        val codeLines = code.split("\n")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp, horizontal = 8.dp)
+        ) {
+            Column(
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier.padding(end = 8.dp)
+            ) {
+                codeLines.indices.forEach { idx ->
+                    Text(
+                        text = "${idx + 1}",
+                        color = CyberTealMuted.copy(alpha = 0.4f),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.End,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+            
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState())
+            ) {
+                Column {
+                    codeLines.forEach { line ->
+                        Text(
+                            text = buildSyntaxHighlightedText(line, CyberWhite),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 15.sp,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SyntaxHighlightedMarkdownMessage(
+    text: String,
+    defaultColor: Color,
+    animate: Boolean = false,
+    speedMs: Long = 12
+) {
+    var displayedLength by remember(text) { mutableStateOf(if (animate) 0 else text.length) }
+    
+    LaunchedEffect(text, animate) {
+        if (animate) {
+            displayedLength = 0
+            while (displayedLength < text.length) {
+                val step = if (text.length > 500) 6 else if (text.length > 200) 3 else 1
+                displayedLength = (displayedLength + step).coerceAtMost(text.length)
+                kotlinx.coroutines.delay(speedMs)
+            }
+        } else {
+            displayedLength = text.length
+        }
+    }
+    
+    val currentText = remember(text, displayedLength) {
+        text.substring(0, displayedLength.coerceAtMost(text.length))
+    }
+    
+    val segments = remember(currentText) {
+        parseMarkdownToBlocks(currentText)
+    }
+    
+    Column(modifier = Modifier.fillMaxWidth()) {
+        segments.forEach { segment ->
+            when (segment) {
+                is BlockSegment.TextBlock -> {
+                    if (segment.text.isNotEmpty()) {
+                        Text(
+                            text = buildSyntaxHighlightedText(segment.text, defaultColor),
+                            color = defaultColor,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 15.sp,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+                is BlockSegment.CodeBlock -> {
+                    CodeBlockTerminal(
+                        language = segment.language,
+                        code = segment.code,
+                        defaultColor = defaultColor
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
