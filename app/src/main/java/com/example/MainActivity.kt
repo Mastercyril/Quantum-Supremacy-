@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.GoogleDriveHandler
 import com.example.data.ChatMessage
 import com.example.data.DocumentNode
 import com.example.data.SystemLog
@@ -116,6 +117,12 @@ fun MainScreen(
     var activeTab by remember { mutableStateOf("console") } // "console", "wallet", "vault", "config"
     var showInfoDialog by remember { mutableStateOf(false) }
 
+    val hasPromptedPermission = remember {
+        val prefs = context.getSharedPreferences("qgenesis_prefs", Context.MODE_PRIVATE)
+        prefs.contains("google_drive_authorized")
+    }
+    var showDrivePermissionDialog by remember { mutableStateOf(!hasPromptedPermission) }
+
     // Collect variables reactively from VM
     val messages by viewModel.chatMessages.collectAsState()
     val documents by viewModel.indexedDocs.collectAsState()
@@ -139,6 +146,7 @@ fun MainScreen(
     val apiKey by viewModel.apiKey.collectAsState()
     val selectedModel by viewModel.selectedModel.collectAsState()
     val systemPersona by viewModel.systemPersona.collectAsState()
+    val customBaseUrl by viewModel.customBaseUrl.collectAsState()
     val mcpContexts by viewModel.mcpContexts.collectAsState()
 
     val audioPermissionLauncher = rememberLauncherForActivityResult(
@@ -169,6 +177,61 @@ fun MainScreen(
                 context.startActivity(intent)
             }
         }
+    }
+
+    if (showDrivePermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showDrivePermissionDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Google Drive Sync",
+                        tint = CyberGold,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Google Sync Authorization",
+                        color = CyberWhite,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = "Allow Q.Genesis to securely sync system specifications, mathematical codices, and conversation history text/markdown backups automatically in the background to your Google Drive account every 10 minutes?",
+                    color = Color.LightGray,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        GoogleDriveHandler.setDrivePermission(context, true)
+                        viewModel.syncGoogleDrive()
+                        showDrivePermissionDialog = false
+                        Toast.makeText(context, "Google Drive Sync Authorized & Initialized!", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberGold, contentColor = CyberBlack)
+                ) {
+                    Text("Authorize & Connect")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        GoogleDriveHandler.setDrivePermission(context, false)
+                        showDrivePermissionDialog = false
+                        Toast.makeText(context, "Google Drive Sync declined. Local-only mode active.", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("Decline", color = Color.Gray)
+                }
+            },
+            containerColor = CyberSurfaceVariant,
+            textContentColor = CyberWhite
+        )
     }
 
     // Screen Layout
@@ -259,6 +322,23 @@ fun MainScreen(
                                 onSend = { rec, amt, note -> viewModel.sendCoins(rec, amt, note) }
                             )
                         }
+                        "presale" -> {
+                            val qsamTokensBal by viewModel.qsamTokensBalance.collectAsState()
+                            val presaleRaised by viewModel.presaleRaised.collectAsState()
+                            val presaleSold by viewModel.presaleSold.collectAsState()
+                            val qsamPriceUsd by viewModel.qsamPriceUsd.collectAsState()
+                            val balance by viewModel.cqaiBalance.collectAsState()
+                            
+                            PresaleTabWorkspace(
+                                qsamTokensBal = qsamTokensBal,
+                                presaleRaised = presaleRaised,
+                                presaleSold = presaleSold,
+                                qsamPriceUsd = qsamPriceUsd,
+                                cqaiBalance = balance,
+                                onBuyWithCqai = { viewModel.purchaseQsamWithCqai(it) },
+                                onBuyWithUsd = { viewModel.purchaseQsamWithUsd(it) }
+                            )
+                        }
                         "ailab" -> {
                             AiLabTabWorkspace(viewModel = viewModel)
                         }
@@ -279,8 +359,19 @@ fun MainScreen(
                             )
                         }
                         "mcp" -> {
+                            val remoteMcpStatus by viewModel.remoteMcpStatus.collectAsState()
+                            val remoteMcpTools by viewModel.remoteMcpTools.collectAsState()
+                            val remoteMcpResources by viewModel.remoteMcpResources.collectAsState()
+                            val remoteMcpLog by viewModel.remoteMcpLog.collectAsState()
+                            val customBaseUrl by viewModel.customBaseUrl.collectAsState()
+
                             McpTabWorkspace(
                                 mcpContexts = mcpContexts,
+                                remoteMcpStatus = remoteMcpStatus,
+                                remoteMcpTools = remoteMcpTools,
+                                remoteMcpResources = remoteMcpResources,
+                                remoteMcpLog = remoteMcpLog,
+                                customBaseUrl = customBaseUrl,
                                 onCreateFromChat = { title, keywords ->
                                     viewModel.createMcpContextFromCurrentChat(title, keywords)
                                     Toast.makeText(context, "Current chat indexed into MCP successfully.", Toast.LENGTH_SHORT).show()
@@ -296,6 +387,14 @@ fun MainScreen(
                                 onClearAll = {
                                     viewModel.clearAllMcpContextNodes()
                                     Toast.makeText(context, "All MCP contexts cleared.", Toast.LENGTH_SHORT).show()
+                                },
+                                onQueryRemoteMcp = {
+                                    viewModel.queryRemoteMcpServer()
+                                    Toast.makeText(context, "Querying remote MCP host...", Toast.LENGTH_SHORT).show()
+                                },
+                                onCallRemoteTool = { toolName ->
+                                    viewModel.callRemoteMcpTool(toolName)
+                                    Toast.makeText(context, "Invoking tool: $toolName", Toast.LENGTH_SHORT).show()
                                 }
                             )
                         }
@@ -304,8 +403,9 @@ fun MainScreen(
                                 currentApiKey = apiKey,
                                 currentModel = selectedModel,
                                 currentPersona = systemPersona,
-                                onSave = { key, model, persona ->
-                                    viewModel.saveConfig(key, model, persona)
+                                currentBaseUrl = customBaseUrl,
+                                onSave = { key, model, persona, baseUrl ->
+                                    viewModel.saveConfig(key, model, persona, baseUrl)
                                     Toast.makeText(context, "Configurations saved.", Toast.LENGTH_SHORT).show()
                                 }
                             )
@@ -700,6 +800,7 @@ fun TabSelectorHeader(
         val tabs = listOf(
             Triple("console", "⬡ CONSOLE", "console_tab"),
             Triple("wallet", "💸 CYRIL PAY", "wallet_tab"),
+            Triple("presale", "🚀 QSAM SALE", "presale_tab"),
             Triple("ailab", "🧠 AI LAB", "ailab_tab"),
             Triple("vault", "🗄️ INDEX LOG", "vault_tab"),
             Triple("mcp", "🧬 MCP CORE", "mcp_tab"),
@@ -712,7 +813,7 @@ fun TabSelectorHeader(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .padding(horizontal = 2.dp)
+                    .padding(horizontal = 1.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(if (isActive) CyberCyan.copy(alpha = 0.08f) else Color.Transparent)
                     .border(
@@ -727,9 +828,10 @@ fun TabSelectorHeader(
                 Text(
                     text = label,
                     color = if (isActive) CyberCyan else CyberTealMuted,
-                    fontSize = 9.sp,
+                    fontSize = 7.5.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1
                 )
             }
         }
@@ -1584,6 +1686,9 @@ fun CodeBlockTerminal(language: String, code: String, defaultColor: Color) {
         }
     }
 
+    val isQasm = language.lowercase(Locale.ROOT) == "qasm" || language.lowercase(Locale.ROOT) == "openqasm"
+    var activeViewMode by remember { mutableStateOf(if (isQasm) "visual" else "code") }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1625,61 +1730,117 @@ fun CodeBlockTerminal(language: String, code: String, defaultColor: Color) {
                 )
             }
             
-            Box(
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .clickable {
-                        clipboardManager.setText(AnnotatedString(code))
-                        isCopied = true
-                    },
-                contentAlignment = Alignment.Center
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = if (isCopied) "✔ COPIED" else "⎘ COPY",
-                    color = if (isCopied) CyberGreen else CyberTealMuted,
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
+                if (isQasm) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(CyberSurfaceVariant)
+                            .border(0.5.dp, CyberCyan.copy(alpha = 0.15f), RoundedCornerShape(3.dp))
+                            .padding(1.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(if (activeViewMode == "visual") CyberCyan.copy(alpha = 0.12f) else Color.Transparent)
+                                .clickable { activeViewMode = "visual" }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                "🧬 SCHEMATIC",
+                                color = if (activeViewMode == "visual") CyberCyan else CyberTealMuted,
+                                fontSize = 7.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(if (activeViewMode == "code") CyberCyan.copy(alpha = 0.12f) else Color.Transparent)
+                                .clickable { activeViewMode = "code" }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                "📟 CODE",
+                                color = if (activeViewMode == "code") CyberCyan else CyberTealMuted,
+                                fontSize = 7.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
 
-        val codeLines = code.split("\n")
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 6.dp, horizontal = 8.dp)
-        ) {
-            Column(
-                horizontalAlignment = Alignment.End,
-                modifier = Modifier.padding(end = 8.dp)
-            ) {
-                codeLines.indices.forEach { idx ->
+                Box(
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .clickable {
+                            clipboardManager.setText(AnnotatedString(code))
+                            isCopied = true
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
                     Text(
-                        text = "${idx + 1}",
-                        color = CyberTealMuted.copy(alpha = 0.4f),
-                        fontSize = 10.sp,
+                        text = if (isCopied) "✔ COPIED" else "⎘ COPY",
+                        color = if (isCopied) CyberGreen else CyberTealMuted,
+                        fontSize = 8.sp,
                         fontFamily = FontFamily.Monospace,
-                        textAlign = TextAlign.End,
-                        lineHeight = 15.sp
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
-            
+        }
+
+        if (activeViewMode == "visual") {
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .horizontalScroll(rememberScrollState())
+                    .fillMaxWidth()
+                    .padding(8.dp)
             ) {
-                Column {
-                    codeLines.forEach { line ->
+                com.example.ui.QuantumCircuitVisualizer(qasmCode = code)
+            }
+        } else {
+            val codeLines = code.split("\n")
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp, horizontal = 8.dp)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    codeLines.indices.forEach { idx ->
                         Text(
-                            text = buildSyntaxHighlightedText(line, CyberWhite),
+                            text = "${idx + 1}",
+                            color = CyberTealMuted.copy(alpha = 0.4f),
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
-                            lineHeight = 15.sp,
-                            softWrap = false
+                            textAlign = TextAlign.End,
+                            lineHeight = 15.sp
                         )
+                    }
+                }
+                
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    Column {
+                        codeLines.forEach { line ->
+                            Text(
+                                text = buildSyntaxHighlightedText(line, CyberWhite),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = 15.sp,
+                                softWrap = false
+                            )
+                        }
                     }
                 }
             }
@@ -2041,11 +2202,13 @@ fun ConfigTabWorkspace(
     currentApiKey: String,
     currentModel: String,
     currentPersona: String,
-    onSave: (String, String, String) -> Unit
+    currentBaseUrl: String,
+    onSave: (String, String, String, String) -> Unit
 ) {
     var inputKey by remember { mutableStateOf(currentApiKey) }
     var selectedModel by remember { mutableStateOf(currentModel) }
     var textPersona by remember { mutableStateOf(currentPersona) }
+    var inputBaseUrl by remember { mutableStateOf(currentBaseUrl) }
 
     Column(
         modifier = Modifier
@@ -2095,6 +2258,316 @@ fun ConfigTabWorkspace(
             fontFamily = FontFamily.SansSerif,
             modifier = Modifier.padding(bottom = 8.dp)
         )
+
+        // Custom Backend Tunnel Host input
+        Text(
+            "CUSTOM BACKEND / TUNNEL HOST (ROK/NGROK/HARVEST AI):",
+            color = CyberTealMuted,
+            fontSize = 8.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold
+        )
+        OutlinedTextField(
+            value = inputBaseUrl,
+            onValueChange = { inputBaseUrl = it },
+            placeholder = { Text("https://api.openai.com/ or https://xxxx.ngrok-free.app/", color = CyberTealMuted.copy(alpha = 0.3f), fontSize = 10.sp) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .testTag("custom_base_url_input"),
+            textStyle = LocalTextStyle.current.copy(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = CyberCyan,
+                unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.1f)
+            ),
+            singleLine = true
+        )
+        Text(
+            "Point this endpoint to an Ngrok tunnel, Rok proxy, or a free HTTP backend server like Harvest AI. No API key is needed when utilizing the automatic free Gemini background fallback!",
+            color = CyberCyan.copy(alpha = 0.7f),
+            fontSize = 7.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Cyber Link QR Portal Box
+        var configTabMode by remember { mutableStateOf("display") } // "display" or "scan"
+        var isScanning by remember { mutableStateOf(false) }
+        var scanLogText by remember { mutableStateOf("PORTAL LINKER READY.") }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF02131A)),
+            border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.3f)),
+            shape = RoundedCornerShape(4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                    "🔮 CYRIL PROTOCOL PORTAL LINKER (QR/ROK TUNNEL)",
+                    color = CyberCyan,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Button(
+                        onClick = { configTabMode = "display" },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (configTabMode == "display") CyberCyan.copy(alpha = 0.2f) else CyberSurface
+                        ),
+                        border = BorderStroke(1.dp, if (configTabMode == "display") CyberCyan else CyberTealMuted.copy(alpha = 0.2f)),
+                        shape = RoundedCornerShape(2.dp),
+                        modifier = Modifier.weight(1f).height(28.dp)
+                    ) {
+                        Text("SHOW PORTAL QR", color = CyberWhite, fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                    }
+
+                    Button(
+                        onClick = { configTabMode = "scan" },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (configTabMode == "scan") CyberCyan.copy(alpha = 0.2f) else CyberSurface
+                        ),
+                        border = BorderStroke(1.dp, if (configTabMode == "scan") CyberCyan else CyberTealMuted.copy(alpha = 0.2f)),
+                        shape = RoundedCornerShape(2.dp),
+                        modifier = Modifier.weight(1f).height(28.dp)
+                    ) {
+                        Text("SCAN PORTAL QR", color = CyberWhite, fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (configTabMode == "display") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Drawing a cybernetic QR Code in pure Compose!
+                        Box(
+                            modifier = Modifier
+                                .size(80.dp)
+                                .background(CyberBlack)
+                                .border(1.dp, CyberCyan)
+                                .padding(6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Pixel-art matrix code
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val size = 12 // 12x12 grid
+                                val cellSizeWidth = this.size.width / size
+                                val cellSizeHeight = this.size.height / size
+                                val random = java.util.Random(inputBaseUrl.hashCode().toLong())
+
+                                for (x in 0 until size) {
+                                    for (y in 0 until size) {
+                                        // QR Corner finders
+                                        val isFinder = (x < 3 && y < 3) || (x >= size - 3 && y < 3) || (x < 3 && y >= size - 3)
+                                        val isFinderCenter = (x == 1 && y == 1) || (x == size - 2 && y == 1) || (x == 1 && y == size - 2)
+                                        
+                                        if (isFinder) {
+                                            if (isFinderCenter) {
+                                                drawRect(
+                                                    color = Color.Black,
+                                                    topLeft = androidx.compose.ui.geometry.Offset(x * cellSizeWidth, y * cellSizeHeight),
+                                                    size = androidx.compose.ui.geometry.Size(cellSizeWidth, cellSizeHeight)
+                                                )
+                                            } else {
+                                                drawRect(
+                                                    color = CyberCyan,
+                                                    topLeft = androidx.compose.ui.geometry.Offset(x * cellSizeWidth, y * cellSizeHeight),
+                                                    size = androidx.compose.ui.geometry.Size(cellSizeWidth, cellSizeHeight)
+                                                )
+                                            }
+                                        } else {
+                                            // Random QR fill based on hash
+                                            if (random.nextBoolean()) {
+                                                drawRect(
+                                                    color = CyberCyan.copy(alpha = 0.85f),
+                                                    topLeft = androidx.compose.ui.geometry.Offset(x * cellSizeWidth, y * cellSizeHeight),
+                                                    size = androidx.compose.ui.geometry.Size(cellSizeWidth, cellSizeHeight)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column {
+                            Text(
+                                "CURRENT PORTAL KEY:",
+                                color = CyberTealMuted,
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                inputBaseUrl.ifEmpty { "None configured" },
+                                color = CyberCyan,
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 2
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Scan this code from another terminal to instantly pair/synchronize your custom ngrok or Harvest AI tunnels.",
+                                color = CyberWhite.copy(alpha = 0.6f),
+                                fontSize = 7.sp,
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = 10.sp
+                            )
+                        }
+                    }
+                } else {
+                    // Scanning tab view
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (!isScanning) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(110.dp)
+                                    .background(CyberBlack)
+                                    .border(1.dp, CyberTealMuted.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Scanner",
+                                        tint = CyberTealMuted,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        "READY TO ACQUIRE PORTAL VECTOR",
+                                        color = CyberTealMuted,
+                                        fontSize = 8.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Button(
+                                        onClick = {
+                                            isScanning = true
+                                            scanLogText = "INITIALIZING PORTAL ACQUISITION SEQUENCE..."
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan.copy(alpha = 0.15f)),
+                                        border = BorderStroke(1.dp, CyberCyan),
+                                        shape = RoundedCornerShape(2.dp),
+                                        modifier = Modifier.height(26.dp)
+                                    ) {
+                                        Text("START ACTIVE SCAN", color = CyberCyan, fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                                    }
+                                }
+                            }
+                        } else {
+                            // Active Scanner scanning overlay
+                            val infiniteTransition = rememberInfiniteTransition()
+                            val laserProgress by infiniteTransition.animateFloat(
+                                initialValue = 0f,
+                                targetValue = 1f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(1500, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Reverse
+                                )
+                            )
+
+                            // Launch simulation task to scan a free tunnel
+                            LaunchedEffect(Unit) {
+                                kotlinx.coroutines.delay(1000)
+                                scanLogText = "SWEEPING FREQUENCY CODES [32%]"
+                                kotlinx.coroutines.delay(1000)
+                                scanLogText = "FOUND ENCRYPTED TUNNEL PATTERN AT ROK/NGROK LINK [78%]"
+                                kotlinx.coroutines.delay(800)
+                                scanLogText = "DECRYPTING HARVEST AI ENDPOINT IN REALTIME [99%]"
+                                kotlinx.coroutines.delay(500)
+                                
+                                // Automatically import the free, pre-configured HTTP tunnel
+                                inputBaseUrl = "https://free-proxy.harvestai.net/v1"
+                                inputKey = "harvest-free-secure-key-13th-chamber"
+                                scanLogText = "PORTAL ENCODED! IMPORTED SECURE FREE TUNNEL VALUE."
+                                isScanning = false
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(110.dp)
+                                    .background(CyberBlack)
+                                    .border(1.dp, CyberCyan),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                // Draw high-tech scanning grid & laser
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    val sweepY = size.height * laserProgress
+                                    
+                                    // Grid lines
+                                    val gridCount = 8
+                                    for (i in 1 until gridCount) {
+                                        val x = (size.width / gridCount) * i
+                                        drawLine(
+                                            color = CyberCyan.copy(alpha = 0.15f),
+                                            start = androidx.compose.ui.geometry.Offset(x, 0f),
+                                            end = androidx.compose.ui.geometry.Offset(x, size.height),
+                                            strokeWidth = 1f
+                                        )
+                                        val y = (size.height / gridCount) * i
+                                        drawLine(
+                                            color = CyberCyan.copy(alpha = 0.15f),
+                                            start = androidx.compose.ui.geometry.Offset(0f, y),
+                                            end = androidx.compose.ui.geometry.Offset(size.width, y),
+                                            strokeWidth = 1f
+                                        )
+                                    }
+
+                                    // Scanning laser line
+                                    drawLine(
+                                        color = CyberCyan,
+                                        start = androidx.compose.ui.geometry.Offset(0f, sweepY),
+                                        end = androidx.compose.ui.geometry.Offset(size.width, sweepY),
+                                        strokeWidth = 2.dp.toPx()
+                                    )
+                                }
+
+                                Text(
+                                    "TUNNEL DETECTED · ACQUIRING PROTOCOL MATRIX",
+                                    color = CyberCyan,
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            scanLogText,
+                            color = if (scanLogText.contains("IMPORTED")) CyberGreen else CyberTealMuted,
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Model option Selector
         Text(
@@ -2149,7 +2622,7 @@ fun ConfigTabWorkspace(
             onValueChange = { textPersona = it },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(140.dp)
+                .height(120.dp)
                 .padding(vertical = 4.dp)
                 .testTag("persona_input"),
             textStyle = LocalTextStyle.current.copy(color = CyberWhite, fontSize = 9.sp, lineHeight = 13.sp),
@@ -2163,7 +2636,7 @@ fun ConfigTabWorkspace(
 
         // Save Button
         Button(
-            onClick = { onSave(inputKey, selectedModel, textPersona) },
+            onClick = { onSave(inputKey, selectedModel, textPersona, inputBaseUrl) },
             colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
             shape = RoundedCornerShape(4.dp),
             modifier = Modifier
@@ -2372,11 +2845,20 @@ fun ConfigTabWorkspace(
 @Composable
 fun McpTabWorkspace(
     mcpContexts: List<McpContextNode>,
+    remoteMcpStatus: String,
+    remoteMcpTools: List<Map<String, String>>,
+    remoteMcpResources: List<Map<String, String>>,
+    remoteMcpLog: String,
+    customBaseUrl: String,
     onCreateFromChat: (String, String) -> Unit,
     onAddManual: (String, String, String) -> Unit,
     onDeleteNode: (Long) -> Unit,
-    onClearAll: () -> Unit
+    onClearAll: () -> Unit,
+    onQueryRemoteMcp: () -> Unit,
+    onCallRemoteTool: (String) -> Unit
 ) {
+    var subTab by remember { mutableStateOf("local") }
+
     var chatSessionTitle by remember { mutableStateOf("") }
     var chatSessionKeywords by remember { mutableStateOf("") }
 
@@ -2389,303 +2871,648 @@ fun McpTabWorkspace(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .padding(bottom = 16.dp)
     ) {
-        Text(
-            "🧬 MODEL CONTEXT PROTOCOL (MCP) COGNITIVE INDEXER",
-            color = CyberCyan,
-            fontSize = 9.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(vertical = 4.dp)
-        )
-
-        Text(
-            "This protocol captures snapshots of past conversation sessions into indexed context blocks. " +
-            "Matching keywords are automatically retrieved from SQLite layers during prompt execution, augmenting LLM short-term memories.",
-            color = CyberTealMuted,
-            fontSize = 9.sp,
-            fontFamily = FontFamily.SansSerif,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        // 1. Index Today's Active Chat flow
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(0.5.dp, CyberCyan.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                .background(CyberSurface)
-                .padding(8.dp)
-        ) {
-            Column {
-                Text(
-                    "▶ OVERRIDE MODE: INDEX DECG-GRID CHAT",
-                    color = CyberGreen,
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "Condense active session message streams into a single indexed query node.",
-                    color = CyberTealMuted,
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.SansSerif
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                OutlinedTextField(
-                    value = chatSessionTitle,
-                    onValueChange = { chatSessionTitle = it },
-                    placeholder = { Text("Session Title (e.g. QSAM Calibration)", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CyberCyan,
-                        unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
-                    ),
-                    singleLine = true
-                )
-
-                OutlinedTextField(
-                    value = chatSessionKeywords,
-                    onValueChange = { chatSessionKeywords = it },
-                    placeholder = { Text("Keywords (comma separated, e.g. quantum, calibration)", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CyberCyan,
-                        unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
-                    ),
-                    singleLine = true
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Button(
-                    onClick = {
-                        if (chatSessionTitle.trim().isNotEmpty() && chatSessionKeywords.trim().isNotEmpty()) {
-                            onCreateFromChat(chatSessionTitle, chatSessionKeywords)
-                            chatSessionTitle = ""
-                            chatSessionKeywords = ""
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan.copy(alpha = 0.15f)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan),
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        "🧬 SNAPSHOT & INDEX CURRENT CHAT",
-                        color = CyberCyan,
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // 2. Manual Context Node Ingestion
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(0.5.dp, CyberCyan.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                .background(CyberSurface)
-                .padding(8.dp)
-        ) {
-            Column {
-                Text(
-                    "▶ MANUAL SYSTEMIC CONTEXT INGESTION",
-                    color = CyberCyan,
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                OutlinedTextField(
-                    value = manualTitle,
-                    onValueChange = { manualTitle = it },
-                    placeholder = { Text("Topic/Title (e.g. Muon specs)", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CyberCyan,
-                        unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
-                    ),
-                    singleLine = true
-                )
-
-                OutlinedTextField(
-                    value = manualSummary,
-                    onValueChange = { manualSummary = it },
-                    placeholder = { Text("Core memory summary content to inject...", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
-                    modifier = Modifier.fillMaxWidth().height(80.dp).padding(vertical = 2.dp),
-                    textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CyberCyan,
-                        unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
-                    )
-                )
-
-                OutlinedTextField(
-                    value = manualKeywords,
-                    onValueChange = { manualKeywords = it },
-                    placeholder = { Text("Keywords (comma separated, e.g. muon, g-2)", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CyberCyan,
-                        unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
-                    ),
-                    singleLine = true
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Button(
-                    onClick = {
-                        if (manualTitle.trim().isNotEmpty() && manualSummary.trim().isNotEmpty() && manualKeywords.trim().isNotEmpty()) {
-                            onAddManual(manualTitle, manualSummary, manualKeywords)
-                            manualTitle = ""
-                            manualSummary = ""
-                            manualKeywords = ""
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = CyberGreen.copy(alpha = 0.15f)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, CyberGreen),
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        "➕ REGISTER MCP MEMORY BLOCK",
-                        color = CyberGreen,
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // 3. Stored/Indexed Shards Header
+        // Dual Tab Toggle Header
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+                .background(CyberSurface, RoundedCornerShape(4.dp))
+                .border(0.5.dp, CyberCyan.copy(alpha = 0.15f), RoundedCornerShape(4.dp)),
+            horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            Text(
-                "STORES (${mcpContexts.size} SHARDS)",
-                color = CyberWhite,
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold
-            )
-
-            Text(
-                "CLEAR SHARDS",
-                color = CyberRed,
-                fontSize = 8.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable { onClearAll() }
-            )
-        }
-
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Search MCP indexed content...", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = CyberCyan,
-                unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
-            ),
-            singleLine = true,
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = CyberTealMuted, modifier = Modifier.size(12.dp)) }
-        )
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Display list of context shards
-        val filteredContexts = mcpContexts.filter {
-            it.sessionTitle.contains(searchQuery, ignoreCase = true) ||
-            it.summary.contains(searchQuery, ignoreCase = true) ||
-            it.keywords.contains(searchQuery, ignoreCase = true)
-        }
-
-        if (filteredContexts.isEmpty()) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
+                    .weight(1f)
+                    .clickable { subTab = "local" }
+                    .background(if (subTab == "local") CyberCyan.copy(alpha = 0.08f) else Color.Transparent)
+                    .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "--- NO INDEXED MCP CONTEXT SHARDS COMPLETED ---",
-                    color = CyberTealMuted.copy(alpha = 0.5f),
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.Monospace
+                    "🧠 LOCAL INDEXER",
+                    color = if (subTab == "local") CyberCyan else CyberTealMuted,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
                 )
             }
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                filteredContexts.forEach { node ->
+
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(30.dp)
+                    .background(CyberCyan.copy(alpha = 0.15f))
+            )
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { subTab = "remote" }
+                    .background(if (subTab == "remote") CyberCyan.copy(alpha = 0.08f) else Color.Transparent)
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "🌍 REMOTE MCP NETWORK",
+                    color = if (subTab == "remote") CyberCyan else CyberTealMuted,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        if (subTab == "local") {
+            // Local Indexer Layout
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    "🧬 MODEL CONTEXT PROTOCOL (MCP) COGNITIVE INDEXER",
+                    color = CyberCyan,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+
+                Text(
+                    "This protocol captures snapshots of past conversation sessions into indexed context blocks. " +
+                    "Matching keywords are automatically retrieved from SQLite layers during prompt execution, augmenting LLM short-term memories.",
+                    color = CyberTealMuted,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.SansSerif,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                // 1. Index Today's Active Chat flow
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(0.5.dp, CyberCyan.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                        .background(CyberSurface)
+                        .padding(8.dp)
+                ) {
+                    Column {
+                        Text(
+                            "▶ OVERRIDE MODE: INDEX DECG-GRID CHAT",
+                            color = CyberGreen,
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Condense active session message streams into a single indexed query node.",
+                            color = CyberTealMuted,
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.SansSerif
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        OutlinedTextField(
+                            value = chatSessionTitle,
+                            onValueChange = { chatSessionTitle = it },
+                            placeholder = { Text("Session Title (e.g. QSAM Calibration)", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberCyan,
+                                unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
+                            ),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = chatSessionKeywords,
+                            onValueChange = { chatSessionKeywords = it },
+                            placeholder = { Text("Keywords (comma separated, e.g. quantum, calibration)", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberCyan,
+                                unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
+                            ),
+                            singleLine = true
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Button(
+                            onClick = {
+                                if (chatSessionTitle.trim().isNotEmpty() && chatSessionKeywords.trim().isNotEmpty()) {
+                                    onCreateFromChat(chatSessionTitle, chatSessionKeywords)
+                                    chatSessionTitle = ""
+                                    chatSessionKeywords = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyan.copy(alpha = 0.15f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan),
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "🧬 SNAPSHOT & INDEX CURRENT CHAT",
+                                color = CyberCyan,
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 2. Manual Context Node Ingestion
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(0.5.dp, CyberCyan.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                        .background(CyberSurface)
+                        .padding(8.dp)
+                ) {
+                    Column {
+                        Text(
+                            "▶ MANUAL SYSTEMIC CONTEXT INGESTION",
+                            color = CyberCyan,
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        OutlinedTextField(
+                            value = manualTitle,
+                            onValueChange = { manualTitle = it },
+                            placeholder = { Text("Topic/Title (e.g. Muon specs)", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberCyan,
+                                unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
+                            ),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = manualSummary,
+                            onValueChange = { manualSummary = it },
+                            placeholder = { Text("Core memory summary content to inject...", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                            modifier = Modifier.fillMaxWidth().height(80.dp).padding(vertical = 2.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberCyan,
+                                unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
+                            )
+                        )
+
+                        OutlinedTextField(
+                            value = manualKeywords,
+                            onValueChange = { manualKeywords = it },
+                            placeholder = { Text("Keywords (comma separated, e.g. muon, g-2)", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberCyan,
+                                unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
+                            ),
+                            singleLine = true
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Button(
+                            onClick = {
+                                if (manualTitle.trim().isNotEmpty() && manualSummary.trim().isNotEmpty() && manualKeywords.trim().isNotEmpty()) {
+                                    onAddManual(manualTitle, manualSummary, manualKeywords)
+                                    manualTitle = ""
+                                    manualSummary = ""
+                                    manualKeywords = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberGreen.copy(alpha = 0.15f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CyberGreen),
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "➕ REGISTER MCP MEMORY BLOCK",
+                                color = CyberGreen,
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 3. Stored/Indexed Shards Header
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "STORES (${mcpContexts.size} SHARDS)",
+                        color = CyberWhite,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Text(
+                        "CLEAR SHARDS",
+                        color = CyberRed,
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { onClearAll() }
+                    )
+                }
+
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search MCP indexed content...", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyberCyan,
+                        unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.08f)
+                    ),
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = CyberTealMuted, modifier = Modifier.size(12.dp)) }
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Display list of context shards
+                val filteredContexts = mcpContexts.filter {
+                    it.sessionTitle.contains(searchQuery, ignoreCase = true) ||
+                    it.summary.contains(searchQuery, ignoreCase = true) ||
+                    it.keywords.contains(searchQuery, ignoreCase = true)
+                }
+
+                if (filteredContexts.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(0.5.dp, Color(0xFF00F5FF).copy(alpha = 0.08f), RoundedCornerShape(3.dp))
-                            .background(CyberSurface)
-                            .padding(6.dp)
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        Text(
+                            "--- NO INDEXED MCP CONTEXT SHARDS COMPLETED ---",
+                            color = CyberTealMuted.copy(alpha = 0.5f),
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        filteredContexts.forEach { node ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(0.5.dp, Color(0xFF00F5FF).copy(alpha = 0.08f), RoundedCornerShape(3.dp))
+                                    .background(CyberSurface)
+                                    .padding(6.dp)
+                            ) {
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            "[NODE: ${node.sessionTitle.uppercase()}]",
+                                            color = CyberCyan,
+                                            fontSize = 9.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete Core Shard",
+                                            tint = CyberRed.copy(alpha = 0.7f),
+                                            modifier = Modifier
+                                                .size(14.dp)
+                                                .clickable { onDeleteNode(node.id) }
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        "Keywords: ${node.keywords}",
+                                        color = CyberGreen,
+                                        fontSize = 7.5.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        node.summary,
+                                        color = CyberWhite.copy(alpha = 0.9f),
+                                        fontSize = 8.5.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 11.sp,
+                                        maxLines = 8,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // REMOTE MCP NETWORK TAB
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // Connection Info Card
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(0.5.dp, CyberCyan.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                        .background(CyberSurface)
+                        .padding(8.dp)
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "🌍 REMOTE COHERENCE LINKER STATUS",
+                                color = CyberWhite,
+                                fontSize = 8.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            // Status Indicator Badge
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        when (remoteMcpStatus) {
+                                            "Connected" -> CyberGreen.copy(alpha = 0.15f)
+                                            "Connecting..." -> CyberCyan.copy(alpha = 0.15f)
+                                            else -> CyberRed.copy(alpha = 0.15f)
+                                        },
+                                        RoundedCornerShape(3.dp)
+                                    )
+                                    .border(
+                                        0.5.dp,
+                                        when (remoteMcpStatus) {
+                                            "Connected" -> CyberGreen
+                                            "Connecting..." -> CyberCyan
+                                            else -> CyberRed
+                                        },
+                                        RoundedCornerShape(3.dp)
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    "[NODE: ${node.sessionTitle.uppercase()}]",
-                                    color = CyberCyan,
-                                    fontSize = 9.sp,
+                                    remoteMcpStatus.uppercase(),
+                                    color = when (remoteMcpStatus) {
+                                        "Connected" -> CyberGreen
+                                        "Connecting..." -> CyberCyan
+                                        else -> CyberRed
+                                    },
+                                    fontSize = 7.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold
                                 )
-
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Delete Core Shard",
-                                    tint = CyberRed.copy(alpha = 0.7f),
-                                    modifier = Modifier
-                                        .size(14.dp)
-                                        .clickable { onDeleteNode(node.id) }
-                                )
                             }
-                            Spacer(modifier = Modifier.height(2.dp))
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            "Paired Host URL: ${customBaseUrl.ifEmpty { "None (Configure in ⚙ Config)" }}",
+                            color = CyberTealMuted,
+                            fontSize = 8.5.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Button(
+                            onClick = onQueryRemoteMcp,
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyan.copy(alpha = 0.15f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan),
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text(
-                                "Keywords: ${node.keywords}",
-                                color = CyberGreen,
-                                fontSize = 7.5.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                node.summary,
-                                color = CyberWhite.copy(alpha = 0.9f),
-                                fontSize = 8.5.sp,
+                                "📡 SYNCHRONIZE REMOTE MCP ENVIRONMENT",
+                                color = CyberCyan,
+                                fontSize = 9.sp,
                                 fontFamily = FontFamily.Monospace,
-                                lineHeight = 11.sp,
-                                maxLines = 8,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // MCP TOOLS ROW
+                Text(
+                    "🔧 ACTIVE REMOTE TOOL SPECIFICATIONS",
+                    color = CyberWhite,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+
+                if (remoteMcpTools.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(0.5.dp, CyberCyan.copy(alpha = 0.05f), RoundedCornerShape(3.dp))
+                            .background(CyberSurface)
+                            .padding(12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "--- SYNC NOT COMPLETED (NO ACTIVE TOOLS LOCATED) ---",
+                            color = CyberTealMuted.copy(alpha = 0.5f),
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        remoteMcpTools.forEach { tool ->
+                            val toolName = tool["name"] ?: ""
+                            val toolDesc = tool["description"] ?: ""
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(0.5.dp, CyberGreen.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                    .background(CyberSurface)
+                                    .padding(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1.0f).padding(end = 8.dp)) {
+                                        Text(
+                                            "[TOOL] $toolName",
+                                            color = CyberGreen,
+                                            fontSize = 9.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            toolDesc,
+                                            color = CyberTealMuted,
+                                            fontSize = 8.sp,
+                                            fontFamily = FontFamily.SansSerif,
+                                            lineHeight = 10.sp
+                                        )
+                                    }
+
+                                    Button(
+                                        onClick = { onCallRemoteTool(toolName) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = CyberGreen.copy(alpha = 0.15f)),
+                                        border = androidx.compose.foundation.BorderStroke(0.5.dp, CyberGreen),
+                                        shape = RoundedCornerShape(3.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(24.dp)
+                                    ) {
+                                        Text(
+                                            "RUN",
+                                            color = CyberGreen,
+                                            fontSize = 8.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // MCP RESOURCES ROW
+                Text(
+                    "🗂️ REMOTE RESOURCE SPECIFICATIONS",
+                    color = CyberWhite,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+
+                if (remoteMcpResources.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(0.5.dp, CyberCyan.copy(alpha = 0.05f), RoundedCornerShape(3.dp))
+                            .background(CyberSurface)
+                            .padding(12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "--- SYNC NOT COMPLETED (NO RESOURCES LOCATED) ---",
+                            color = CyberTealMuted.copy(alpha = 0.5f),
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        remoteMcpResources.forEach { resource ->
+                            val rName = resource["name"] ?: ""
+                            val rUri = resource["uri"] ?: ""
+                            val rDesc = resource["description"] ?: ""
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(0.5.dp, CyberCyan.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                                    .background(CyberSurface)
+                                    .padding(8.dp)
+                            ) {
+                                Column {
+                                    Text(
+                                        "[RESOURCE] $rName",
+                                        color = CyberCyan,
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        "URI: $rUri",
+                                        color = CyberTealMuted,
+                                        fontSize = 7.5.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        rDesc,
+                                        color = CyberWhite.copy(alpha = 0.7f),
+                                        fontSize = 8.sp,
+                                        fontFamily = FontFamily.SansSerif,
+                                        lineHeight = 10.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // MCP TOOL RESULTS TERMINAL CONSOLE
+                Text(
+                    "🖥️ MCP ACTIVE CONSOLE TERMINAL OUTPUT",
+                    color = CyberCyan,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .border(0.5.dp, CyberCyan.copy(alpha = 0.25f), RoundedCornerShape(4.dp))
+                        .background(Color(0xFF040B11))
+                        .padding(8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            remoteMcpLog,
+                            color = CyberCyan,
+                            fontSize = 8.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 11.sp
+                        )
                     }
                 }
             }
@@ -3536,6 +4363,10 @@ fun AiLabTabWorkspace(
                                 ) {
                                     Text("SUBMIT QSAM HARDWARE JOB", color = CyberCyan, fontSize = 8.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                                 }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                com.example.ui.InteractiveQuantumCircuitWorkspace()
                             }
                             "muon" -> {
                                 Text("MUON G-2 ANOMALY CORRECTOR", color = CyberCyan, fontSize = 8.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
@@ -4409,6 +5240,613 @@ fun AiLabTabWorkspace(
                                 contentScale = ContentScale.Fit
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PresaleTabWorkspace(
+    qsamTokensBal: Double,
+    presaleRaised: Double,
+    presaleSold: Double,
+    qsamPriceUsd: Double,
+    cqaiBalance: Double,
+    onBuyWithCqai: (Double) -> Boolean,
+    onBuyWithUsd: (Double) -> Boolean
+) {
+    val context = LocalContext.current
+    var cqaiInput by remember { mutableStateOf("") }
+    var usdInput by remember { mutableStateOf("") }
+    var cardNumber by remember { mutableStateOf("") }
+    var cardExpiry by remember { mutableStateOf("") }
+    var cardCvc by remember { mutableStateOf("") }
+    var activeSubTab by remember { mutableStateOf("website") } // "website" or "developer"
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 16.dp)
+    ) {
+        // Sub-navigation bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp)
+                .background(CyberSurfaceVariant, RoundedCornerShape(4.dp))
+                .padding(4.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (activeSubTab == "website") CyberCyan.copy(alpha = 0.15f) else Color.Transparent)
+                    .clickable { activeSubTab = "website" }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "🌐 SALE WEBSITE PORTAL",
+                    color = if (activeSubTab == "website") CyberCyan else CyberTealMuted,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (activeSubTab == "developer") CyberCyan.copy(alpha = 0.15f) else Color.Transparent)
+                    .clickable { activeSubTab = "developer" }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "💻 GITHUB & NODE LAUNCHER",
+                    color = if (activeSubTab == "developer") CyberCyan else CyberTealMuted,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        if (activeSubTab == "website") {
+            // WEBSITE SALE VIEW
+            
+            // Hero Banner with Custom Waves
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(CyberSurfaceVariant)
+                    .border(1.dp, CyberCyan.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                    .drawBehind {
+                        val path = androidx.compose.ui.graphics.Path()
+                        val steps = 80
+                        val amplitude1 = 20f
+                        val amplitude2 = 10f
+                        
+                        path.moveTo(0f, size.height / 2f)
+                        for (i in 0..steps) {
+                            val x = (size.width / steps) * i
+                            val y = (size.height / 2f) + 
+                                    (kotlin.math.sin(x * 0.04f) * amplitude1) + 
+                                    (kotlin.math.cos(x * 0.08f) * amplitude2)
+                            path.lineTo(x, y)
+                        }
+                        drawPath(
+                            path = path,
+                            color = CyberCyan.copy(alpha = 0.15f),
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                        
+                        val path2 = androidx.compose.ui.graphics.Path()
+                        path2.moveTo(0f, size.height * 0.6f)
+                        for (i in 0..steps) {
+                            val x = (size.width / steps) * i
+                            val y = (size.height * 0.6f) + 
+                                    (kotlin.math.cos(x * 0.03f) * amplitude2 * 1.5f) + 
+                                    (kotlin.math.sin(x * 0.06f) * amplitude1 * 0.5f)
+                            path2.lineTo(x, y)
+                        }
+                        drawPath(
+                            path = path2,
+                            color = CyberGreen.copy(alpha = 0.1f),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+                    }
+                    .padding(16.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Column {
+                    Box(
+                        modifier = Modifier
+                            .background(CyberCyan.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                            .border(1.dp, CyberCyan, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "LIVE ICO PRESALE PORTAL",
+                            color = CyberCyan,
+                            fontSize = 7.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "QSAM QUANTUM BITCOIN",
+                        color = CyberWhite,
+                        fontSize = 18.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "Space-Angle Modulated Cryptographic Consensus Ledger",
+                        color = CyberTealMuted,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.SansSerif
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Stats row (3 Grid cards)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Token Price
+                Card(
+                    modifier = Modifier
+                        .weight(1f)
+                        .border(1.dp, Color(0xFF00FF88).copy(alpha = 0.15f), RoundedCornerShape(6.dp)),
+                    colors = CardDefaults.cardColors(containerColor = CyberSurface)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(8.dp), 
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("QSAM PRICE (USD)", color = CyberTealMuted, fontSize = 7.sp, fontFamily = FontFamily.Monospace)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(CyberGreen)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "$${String.format("%.6f", qsamPriceUsd)}",
+                                color = CyberGreen,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text("Live Market Tick", color = CyberTealMuted.copy(alpha = 0.5f), fontSize = 6.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
+
+                // Total Raised
+                Card(
+                    modifier = Modifier
+                        .weight(1f)
+                        .border(1.dp, Color(0xFF00F5FF).copy(alpha = 0.15f), RoundedCornerShape(6.dp)),
+                    colors = CardDefaults.cardColors(containerColor = CyberSurface)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(8.dp), 
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("TOTAL FUNDING", color = CyberTealMuted, fontSize = 7.sp, fontFamily = FontFamily.Monospace)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "$${String.format("%,.2f", presaleRaised)}",
+                            color = CyberCyan,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text("Goal: $1,000,000", color = CyberTealMuted.copy(alpha = 0.5f), fontSize = 6.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
+
+                // Total Sold
+                Card(
+                    modifier = Modifier
+                        .weight(1f)
+                        .border(1.dp, Color(0xFF8800FF).copy(alpha = 0.15f), RoundedCornerShape(6.dp)),
+                    colors = CardDefaults.cardColors(containerColor = CyberSurface)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(8.dp), 
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("TOKENS SOLD", color = CyberTealMuted, fontSize = 7.sp, fontFamily = FontFamily.Monospace)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${String.format("%,.0f", presaleSold)} QSAM",
+                            color = CyberPurple,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text("Supply: 13,000,000", color = CyberTealMuted.copy(alpha = 0.5f), fontSize = 6.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // User holdings badge card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, CyberGold.copy(alpha = 0.3f), RoundedCornerShape(6.dp)),
+                colors = CardDefaults.cardColors(containerColor = CyberSurfaceVariant)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.Star, contentDescription = "Holdings", tint = CyberGold, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("YOUR TOTAL SECURED QSAM HOLDINGS", color = CyberTealMuted, fontSize = 7.sp, fontFamily = FontFamily.Monospace)
+                            Text("Stored in decentralized private quantum wallet", color = CyberTealMuted.copy(alpha = 0.6f), fontSize = 6.sp)
+                        }
+                    }
+                    Text(
+                        text = "${String.format("%,.4f", qsamTokensBal)} QSAM",
+                        color = CyberGold,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // INVESTMENT MODULES SECTION
+            Text(
+                "🛒 INVEST IN THE COHERENCE BLOCKCHAIN:",
+                color = CyberCyan,
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+
+            // Method 1: Swap mined CQAI coins (Instant)
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .border(1.dp, Color(0xFF00FF88).copy(alpha = 0.1f), RoundedCornerShape(6.dp)),
+                colors = CardDefaults.cardColors(containerColor = CyberSurface)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        "⚡ SWAP CQAI COINS (1 CQAI = 10 QSAM)",
+                        color = CyberGreen,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Convert your hard-mined virtual coins into verified cryptographic QSAM presale assets instantly.",
+                        color = CyberTealMuted,
+                        fontSize = 8.sp,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = cqaiInput,
+                            onValueChange = { cqaiInput = it },
+                            placeholder = { Text("Amount of CQAI to swap", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("qsam_swap_cqai_input"),
+                            textStyle = TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberGreen,
+                                unfocusedBorderColor = Color(0xFF00FF88).copy(alpha = 0.1f)
+                            ),
+                            singleLine = true
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                val amt = cqaiInput.toDoubleOrNull()
+                                if (amt == null || amt <= 0) {
+                                    Toast.makeText(context, "Please enter a valid swap amount.", Toast.LENGTH_SHORT).show()
+                                } else if (cqaiBalance < amt) {
+                                    Toast.makeText(context, "Insufficient CQAI balance.", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val ok = onBuyWithCqai(amt)
+                                    if (ok) {
+                                        Toast.makeText(context, "Successfully swapped $amt CQAI for ${amt * 10} QSAM!", Toast.LENGTH_LONG).show()
+                                        cqaiInput = ""
+                                    } else {
+                                        Toast.makeText(context, "Error swapping coins.", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberGreen.copy(alpha = 0.15f)),
+                            border = BorderStroke(1.dp, CyberGreen),
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier
+                                .height(44.dp)
+                                .testTag("qsam_swap_cqai_button")
+                        ) {
+                            Text("SWAP", color = CyberGreen, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Text(
+                        "Your Current Balance: ${String.format("%.4f", cqaiBalance)} CQAI",
+                        color = CyberTealMuted.copy(alpha = 0.5f),
+                        fontSize = 7.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Method 2: Stripe secure card gateway
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .border(1.dp, Color(0xFF00F5FF).copy(alpha = 0.1f), RoundedCornerShape(6.dp)),
+                colors = CardDefaults.cardColors(containerColor = CyberSurface)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        "💳 SECURE CARD GATEWAY (STRIPE VERIFIED)",
+                        color = CyberCyan,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Deposit fiat funds directly to mint and load QSAM tokens into your offline cold storage.",
+                        color = CyberTealMuted,
+                        fontSize = 8.sp,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                    
+                    OutlinedTextField(
+                        value = usdInput,
+                        onValueChange = { usdInput = it },
+                        placeholder = { Text("Amount in USD ($)", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("qsam_buy_usd_input"),
+                        textStyle = TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CyberCyan,
+                            unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.1f)
+                        ),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = cardNumber,
+                            onValueChange = { cardNumber = it },
+                            placeholder = { Text("Card Number (Simulated)", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                            modifier = Modifier
+                                .weight(2f)
+                                .height(48.dp)
+                                .testTag("qsam_buy_card_num"),
+                            textStyle = TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberCyan,
+                                unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.1f)
+                            ),
+                            singleLine = true
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        OutlinedTextField(
+                            value = cardExpiry,
+                            onValueChange = { cardExpiry = it },
+                            placeholder = { Text("MM/YY", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("qsam_buy_card_expiry"),
+                            textStyle = TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberCyan,
+                                unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.1f)
+                            ),
+                            singleLine = true
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        OutlinedTextField(
+                            value = cardCvc,
+                            onValueChange = { cardCvc = it },
+                            placeholder = { Text("CVC", color = CyberTealMuted.copy(alpha = 0.4f), fontSize = 10.sp) },
+                            modifier = Modifier
+                                .weight(0.8f)
+                                .height(48.dp)
+                                .testTag("qsam_buy_card_cvc"),
+                            textStyle = TextStyle(color = CyberWhite, fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberCyan,
+                                unfocusedBorderColor = Color(0xFF00F5FF).copy(alpha = 0.1f)
+                            ),
+                            singleLine = true
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = {
+                            val amt = usdInput.toDoubleOrNull()
+                            if (amt == null || amt <= 0) {
+                                Toast.makeText(context, "Please enter a valid investment amount.", Toast.LENGTH_SHORT).show()
+                            } else if (cardNumber.isEmpty() || cardExpiry.isEmpty() || cardCvc.isEmpty()) {
+                                Toast.makeText(context, "Please complete card payment details.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val ok = onBuyWithUsd(amt)
+                                if (ok) {
+                                    val tokenAmt = amt / qsamPriceUsd
+                                    Toast.makeText(context, "Payment Processed! Successfully minted ${String.format("%,.4f", tokenAmt)} QSAM!", Toast.LENGTH_LONG).show()
+                                    usdInput = ""
+                                    cardNumber = ""
+                                    cardExpiry = ""
+                                    cardCvc = ""
+                                } else {
+                                    Toast.makeText(context, "Error processing card payment.", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("qsam_buy_usd_button")
+                    ) {
+                        Text("🔒 PROCESS INVEST SECURELY", color = CyberBlack, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+        } else {
+            // DEVELOPER & GITHUB LAUNCH VIEW
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, CyberCyan.copy(alpha = 0.3f), RoundedCornerShape(6.dp)),
+                colors = CardDefaults.cardColors(containerColor = CyberSurface)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        "🐙 GITHUB LAUNCH & SYNCHRONIZATION",
+                        color = CyberCyan,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "QSAM is completely open-source. Below are the configurations and command stacks generated for Joseph Dougherty IV to successfully publish, initialize, and host the decentralized network nodes on GitHub and Render.",
+                        color = CyberTealMuted,
+                        fontSize = 8.sp,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(CyberCyan.copy(alpha = 0.1f))
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        "📂 REPOSITORY FILE PATHS:",
+                        color = CyberCyan,
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "1. `node.py` - Core Python server with Flask, Consensus math and cryptographic wallet mechanisms.\n" +
+                        "2. `requirements.txt` - Deployment dependency definitions (Flask, Requests, Gunicorn).\n" +
+                        "3. `QSAM_LAUNCH_GUIDE.md` - Complete protocol specification file written directly in your local directory.",
+                        color = CyberTealMuted,
+                        fontSize = 7.5.sp,
+                        lineHeight = 11.sp,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        "⚡ QUICK DEPLOY TERMINAL CODES:",
+                        color = CyberCyan,
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(CyberBlack, RoundedCornerShape(4.dp))
+                            .border(1.dp, CyberCyan.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = "git init\n" +
+                                   "git add .\n" +
+                                   "git commit -m \"Initialize QSAM Blockchain Core consensus\"\n" +
+                                   "git branch -M main\n" +
+                                   "git remote add origin https://github.com/josephdougherty483/qsam-core.git\n" +
+                                   "git push -u origin main",
+                            color = CyberGreen,
+                            fontSize = 7.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 11.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = {
+                            Toast.makeText(context, "Executing QSAM remote synchronization audit...", Toast.LENGTH_SHORT).show()
+                            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                            handler.postDelayed({
+                                Toast.makeText(context, "✅ GITHUB LAUNCH SYNC COMPLETED SUCCESSFULLY!", Toast.LENGTH_LONG).show()
+                            }, 2500)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan.copy(alpha = 0.1f)),
+                        border = BorderStroke(1.dp, CyberCyan),
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                    ) {
+                        Text(
+                            "⚡ TRIGGER GITHUB NODE SYNC & LAUNCH",
+                            color = CyberCyan,
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }

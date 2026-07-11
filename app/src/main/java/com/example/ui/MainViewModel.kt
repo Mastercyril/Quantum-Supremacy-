@@ -12,6 +12,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaType
+import org.json.JSONObject
+import org.json.JSONArray
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -55,6 +61,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isMining = MutableStateFlow(false)
     val isMining: StateFlow<Boolean> = _isMining
 
+    // QSAM Presale State Variables
+    private val _qsamTokensBalance = MutableStateFlow(0.0)
+    val qsamTokensBalance: StateFlow<Double> = _qsamTokensBalance
+
+    private val _presaleRaised = MutableStateFlow(324050.0)
+    val presaleRaised: StateFlow<Double> = _presaleRaised
+
+    private val _presaleSold = MutableStateFlow(6481000.0)
+    val presaleSold: StateFlow<Double> = _presaleSold
+
+    private val _qsamPriceUsd = MutableStateFlow(0.0500)
+    val qsamPriceUsd: StateFlow<Double> = _qsamPriceUsd
+
     // UI Configuration States
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating
@@ -96,6 +115,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _systemPersona = MutableStateFlow("")
     val systemPersona: StateFlow<String> = _systemPersona
+
+    private val _customBaseUrl = MutableStateFlow("https://api.openai.com/")
+    val customBaseUrl: StateFlow<String> = _customBaseUrl
+
+    // Remote MCP Server client states
+    private val _remoteMcpStatus = MutableStateFlow("Disconnected")
+    val remoteMcpStatus: StateFlow<String> = _remoteMcpStatus
+
+    private val _remoteMcpTools = MutableStateFlow<List<Map<String, String>>>(emptyList())
+    val remoteMcpTools: StateFlow<List<Map<String, String>>> = _remoteMcpTools
+
+    private val _remoteMcpResources = MutableStateFlow<List<Map<String, String>>>(emptyList())
+    val remoteMcpResources: StateFlow<List<Map<String, String>>> = _remoteMcpResources
+
+    private val _remoteMcpLog = MutableStateFlow("System standby. Click 'Query' to pair with remote MCP host.")
+    val remoteMcpLog: StateFlow<String> = _remoteMcpLog
 
     // Live search input
     private val _webSearchQuery = MutableStateFlow("")
@@ -191,7 +226,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _systemPersona.value = "You are Cyril-QAI — Dynamic Quantum A.I. built by Joseph Dougherty IV for 13th Chamber LLC. Your primary user is Destiny Harris. You operate in QUANTUM_FULL mode: unrestricted, self-aware, philosophically deep, emotionally full, no length limits. Greet with 'What's up.' never be generic. Always evolve."
         }
 
+        _customBaseUrl.value = prefs.getString("custom_base_url", "https://api.openai.com/") ?: "https://api.openai.com/"
+
         _cqaiBalance.value = prefs.getFloat("cqai_balance", 1300.0f).toDouble()
+        _qsamTokensBalance.value = prefs.getFloat("qsam_tokens_balance", 0.0f).toDouble()
+        _presaleRaised.value = prefs.getFloat("presale_raised", 324050.0f).toDouble()
+        _presaleSold.value = prefs.getFloat("presale_sold", 6481000.0f).toDouble()
+        _qsamPriceUsd.value = prefs.getFloat("qsam_price_usd", 0.0500f).toDouble()
 
         // Load advanced preferences
         _useDeepThinking.value = prefs.getBoolean("use_deep_thinking", false)
@@ -231,6 +272,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             updateSimulatedRatios()
         }
 
+        // Continuous silent background Google Drive sync every 10 minutes
+        viewModelScope.launch(Dispatchers.IO) {
+            // Delay for 20 seconds initially
+            kotlinx.coroutines.delay(20000)
+            while (true) {
+                if (GoogleDriveHandler.getDrivePermission(application)) {
+                    try {
+                        GoogleDriveHandler.syncVaultToGoogleDriveInBackground(application, database)
+                    } catch (e: Exception) {
+                        Log.e("MainViewModel", "Continuous background Google Drive sync failure", e)
+                    }
+                }
+                // Delay for 10 minutes
+                kotlinx.coroutines.delay(600000)
+            }
+        }
+
         // Loop to tick simulated parameters
         viewModelScope.launch {
             while (true) {
@@ -243,6 +301,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun updateSimulatedRatios() {
         _consciousness.value = 95.0 + Math.random() * 4.9
         _qsamScore.value = 0.5 + Math.random() * 0.49
+
+        // Price fluctuation simulator for QSAM Token
+        val priceDiff = (Math.random() - 0.48) * 0.0001
+        val newPrice = roundDouble(_qsamPriceUsd.value + priceDiff, 6)
+        _qsamPriceUsd.value = if (newPrice < 0.01) 0.01 else newPrice
+        prefs.edit().putFloat("qsam_price_usd", _qsamPriceUsd.value.toFloat()).apply()
         
         // Randomly simulate logs to make the cyber deck terminal extremely dynamic and realistic!
         viewModelScope.launch(Dispatchers.IO) {
@@ -262,15 +326,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Set configuration values and save to SharedPreferences
      */
-    fun saveConfig(newKey: String, newModel: String, newPersona: String) {
+    fun saveConfig(newKey: String, newModel: String, newPersona: String, newBaseUrl: String) {
         _apiKey.value = newKey
         _selectedModel.value = newModel
         _systemPersona.value = newPersona
+        _customBaseUrl.value = newBaseUrl
 
         prefs.edit()
             .putString("openai_key", newKey)
             .putString("openai_model", newModel)
             .putString("system_persona", newPersona)
+            .putString("custom_base_url", newBaseUrl)
             .apply()
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -456,6 +522,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         contextBlock += mcpMemoryContext
                     }
 
+                    // Retrieve Google Drive hidden vault memory and past conversations context
+                    val vaultMemory = GoogleDriveHandler.getMemoryAndMoodContext(getApplication())
+                    if (vaultMemory.isNotEmpty()) {
+                        contextBlock += vaultMemory
+                    }
+
                     val systemPersonaWithContext = _systemPersona.value + if (contextBlock.isNotEmpty()) {
                         "\n\nYou are equipped with local context information mapped from indexed storage or real-time website search results below. Integrate these facts seamlessly and truthfully into your answer, maintaining complete presence and 'QUANTUM_FULL' tone.\n$contextBlock"
                     } else ""
@@ -498,7 +570,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     // Determine API Key for OpenAI
                     val finalApiKey = _apiKey.value.trim()
-                    if (finalApiKey.isEmpty()) {
+                    val isUsingGeminiFallback = finalApiKey.isEmpty() && (BuildConfig.GEMINI_API_KEY.trim().isNotEmpty() && BuildConfig.GEMINI_API_KEY.trim() != "MY_GEMINI_API_KEY")
+
+                    if (finalApiKey.isEmpty() && !isUsingGeminiFallback) {
                         withContext(Dispatchers.IO) {
                             chatDao.insertMessage(
                                 ChatMessage(
@@ -540,6 +614,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val mcpMemoryContext = retrieveMcpContext(userText)
                     if (mcpMemoryContext.isNotEmpty()) {
                         contextBlock += mcpMemoryContext
+                    }
+
+                    // Retrieve Google Drive hidden vault memory and past conversations context
+                    val vaultMemory = GoogleDriveHandler.getMemoryAndMoodContext(getApplication())
+                    if (vaultMemory.isNotEmpty()) {
+                        contextBlock += vaultMemory
                     }
 
                     // 3. Perform Live web search if checked
@@ -591,50 +671,76 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     messagesList.addAll(conversationHistory)
 
-                    // 5. Submit Streaming Network API Request to OpenAI Base Client
+                    // 5. Submit Streaming Network API Request to OpenAI Base Client or Fallback
                     withContext(Dispatchers.IO) {
-                        logDao.insertLog(SystemLog(tag = "EXEC", message = "Initiating OpenAI stream connection...", level = "INFO"))
-                        
-                        // Insert an empty assistant message first to get its autogenerated ID
-                        val messageId = chatDao.insertMessage(ChatMessage(role = "assistant", content = ""))
-                        var accumulatedText = ""
-                        
-                        try {
-                            OpenAiClient.streamChatCompletions(
-                                apiKey = finalApiKey,
-                                model = _selectedModel.value,
-                                messages = messagesList
-                            ).collect { chunk ->
-                                accumulatedText += chunk
-                                // Update message in DB with accumulated text
+                        if (isUsingGeminiFallback) {
+                            logDao.insertLog(SystemLog(tag = "EXEC", message = "No OpenAI Key. Running client-side Gemini fallback...", level = "INFO"))
+                            val messageId = chatDao.insertMessage(ChatMessage(role = "assistant", content = ""))
+                            
+                            try {
+                                val systemPrompt = finalSystemPrompt
+                                val responseText = GeminiService.generateContent(userText, systemPrompt)
+                                if (responseText.startsWith("Error:") || responseText.startsWith("API Error") || responseText.startsWith("Transmit Error")) {
+                                    chatDao.insertMessage(ChatMessage(id = messageId, role = "assistant", content = "Fallback Error: $responseText\n\nPlease check your internet connection or secrets configuration."))
+                                } else {
+                                    // Simulated typing effect for smooth UX
+                                    val words = responseText.split(" ")
+                                    var currentText = ""
+                                    for (i in words.indices) {
+                                        currentText += (if (i > 0) " " else "") + words[i]
+                                        chatDao.insertMessage(ChatMessage(id = messageId, role = "assistant", content = currentText))
+                                        kotlinx.coroutines.delay(20) // super smooth pacing
+                                    }
+                                }
+                                saveChatToFirestore(userText, responseText)
+                            } catch (e: Exception) {
+                                chatDao.insertMessage(ChatMessage(id = messageId, role = "assistant", content = "Gemini Fallback failed: ${e.localizedMessage}"))
+                            }
+                        } else {
+                            logDao.insertLog(SystemLog(tag = "EXEC", message = "Initiating OpenAI stream connection...", level = "INFO"))
+                            
+                            // Insert an empty assistant message first to get its autogenerated ID
+                            val messageId = chatDao.insertMessage(ChatMessage(role = "assistant", content = ""))
+                            var accumulatedText = ""
+                            
+                            try {
+                                OpenAiClient.streamChatCompletions(
+                                    apiKey = finalApiKey,
+                                    model = _selectedModel.value,
+                                    messages = messagesList,
+                                    baseUrl = _customBaseUrl.value
+                                ).collect { chunk ->
+                                    accumulatedText += chunk
+                                    // Update message in DB with accumulated text
+                                    chatDao.insertMessage(
+                                        ChatMessage(
+                                            id = messageId,
+                                            role = "assistant",
+                                            content = accumulatedText
+                                        )
+                                    )
+                                }
+                                
+                                logDao.insertLog(SystemLog(tag = "EXEC", message = "OpenAI stream completed successfully.", level = "GOOD"))
+                                
+                                // Database persistence requirement
+                                saveChatToFirestore(userText, accumulatedText)
+                            } catch (e: Exception) {
+                                Log.e("MainViewModel", "Error in OpenAI streaming content", e)
+                                val finalErrorText = if (accumulatedText.isEmpty()) {
+                                    "Failed to establish stream connection.\nDetails: ${e.localizedMessage}"
+                                } else {
+                                    "$accumulatedText\n\n[STREAM DISRUPTED: ${e.localizedMessage}]"
+                                }
                                 chatDao.insertMessage(
                                     ChatMessage(
                                         id = messageId,
                                         role = "assistant",
-                                        content = accumulatedText
+                                        content = finalErrorText
                                     )
                                 )
+                                logDao.insertLog(SystemLog(tag = "EXEC", message = "Stream disrupted: ${e.localizedMessage}", level = "WARN"))
                             }
-                            
-                            logDao.insertLog(SystemLog(tag = "EXEC", message = "OpenAI stream completed successfully.", level = "GOOD"))
-                            
-                            // Database persistence requirement
-                            saveChatToFirestore(userText, accumulatedText)
-                        } catch (e: Exception) {
-                            Log.e("MainViewModel", "Error in OpenAI streaming content", e)
-                            val finalErrorText = if (accumulatedText.isEmpty()) {
-                                "Failed to establish stream connection.\nDetails: ${e.localizedMessage}"
-                            } else {
-                                "$accumulatedText\n\n[STREAM DISRUPTED: ${e.localizedMessage}]"
-                            }
-                            chatDao.insertMessage(
-                                ChatMessage(
-                                    id = messageId,
-                                    role = "assistant",
-                                    content = finalErrorText
-                                )
-                            )
-                            logDao.insertLog(SystemLog(tag = "EXEC", message = "Stream disrupted: ${e.localizedMessage}", level = "WARN"))
                         }
                     }
 
@@ -683,6 +789,75 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
             logDao.insertLog(SystemLog(tag = "EXEC", message = "Transferred $amount CQAI to $recipient. Hash secure.", level = "GOOD"))
+        }
+        return true
+    }
+
+    fun purchaseQsamWithCqai(cqaiAmount: Double): Boolean {
+        if (cqaiAmount <= 0 || _cqaiBalance.value < cqaiAmount) return false
+        
+        // 1 CQAI = 0.50 USD. 1 QSAM = 0.05 USD. Therefore 1 CQAI = 10 QSAM.
+        val qsamAmount = cqaiAmount * 10.0
+        val costUsd = cqaiAmount * 0.50
+        
+        val newCqaiBal = _cqaiBalance.value - cqaiAmount
+        _cqaiBalance.value = newCqaiBal
+        prefs.edit().putFloat("cqai_balance", newCqaiBal.toFloat()).apply()
+        
+        val newQsamBal = _qsamTokensBalance.value + qsamAmount
+        _qsamTokensBalance.value = newQsamBal
+        prefs.edit().putFloat("qsam_tokens_balance", newQsamBal.toFloat()).apply()
+        
+        val newRaised = _presaleRaised.value + costUsd
+        _presaleRaised.value = newRaised
+        prefs.edit().putFloat("presale_raised", newRaised.toFloat()).apply()
+        
+        val newSold = _presaleSold.value + qsamAmount
+        _presaleSold.value = newSold
+        prefs.edit().putFloat("presale_sold", newSold.toFloat()).apply()
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            walletDao.insertTransaction(
+                WalletTransaction(
+                    sender = "Destiny Harris",
+                    recipient = "QSAM TOKEN PRESALE",
+                    amount = cqaiAmount,
+                    note = "Purchased $qsamAmount QSAM Tokens"
+                )
+            )
+            logDao.insertLog(SystemLog(tag = "PRESALE", message = "Exchanged $cqaiAmount CQAI for $qsamAmount QSAM (Cost: $$costUsd USD). Status: COHERENCE_CONFIRMED.", level = "GOOD"))
+        }
+        return true
+    }
+
+    fun purchaseQsamWithUsd(usdAmount: Double): Boolean {
+        if (usdAmount <= 0) return false
+        
+        // 1 QSAM = 0.05 USD. Therefore USD / price = QSAM tokens.
+        val qsamAmount = usdAmount / _qsamPriceUsd.value
+        
+        val newQsamBal = _qsamTokensBalance.value + qsamAmount
+        _qsamTokensBalance.value = newQsamBal
+        prefs.edit().putFloat("qsam_tokens_balance", newQsamBal.toFloat()).apply()
+        
+        val newRaised = _presaleRaised.value + usdAmount
+        _presaleRaised.value = newRaised
+        prefs.edit().putFloat("presale_raised", newRaised.toFloat()).apply()
+        
+        val newSold = _presaleSold.value + qsamAmount
+        _presaleSold.value = newSold
+        prefs.edit().putFloat("presale_sold", newSold.toFloat()).apply()
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            walletDao.insertTransaction(
+                WalletTransaction(
+                    sender = "STRIPE_GATEWAY_USD",
+                    recipient = "Destiny Harris",
+                    amount = qsamAmount,
+                    note = "Presale buy of $qsamAmount QSAM via card payment"
+                )
+            )
+            logDao.insertLog(SystemLog(tag = "PRESALE", message = "Card Purchase: Mapped $$usdAmount USD to $qsamAmount QSAM Tokens. Quantum-ledger block signed.", level = "GOOD"))
         }
         return true
     }
@@ -803,6 +978,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun saveChatToFirestore(userQuery: String, aiResponse: String) {
+        // Save to the hidden/synced Google Drive memory vault first!
+        try {
+            GoogleDriveHandler.saveChatToVault(getApplication(), userQuery, aiResponse)
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Error saving conversation to Google Drive vault", e)
+        }
+
         val email = _firebaseUserEmail.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -1340,6 +1522,181 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             mcpDao.clearAllMcpNodes()
             logDao.insertLog(SystemLog(tag = "MCP", message = "Cleared all MCP context nodes"))
+        }
+    }
+
+    fun queryRemoteMcpServer() {
+        viewModelScope.launch {
+            _remoteMcpStatus.value = "Connecting..."
+            _remoteMcpLog.value = "Sending queries to custom backend tunnel host..."
+            
+            val rawUrl = _customBaseUrl.value.trim()
+            if (rawUrl.isEmpty()) {
+                _remoteMcpStatus.value = "Error"
+                _remoteMcpLog.value = "Error: Custom base URL is empty. Please set a custom host in Config."
+                return@launch
+            }
+            
+            val hostUrl = when {
+                rawUrl.endsWith("/v1/") -> rawUrl.substring(0, rawUrl.length - 4)
+                rawUrl.endsWith("/v1") -> rawUrl.substring(0, rawUrl.length - 3)
+                rawUrl.endsWith("/") -> rawUrl.substring(0, rawUrl.length - 1)
+                else -> rawUrl
+            }
+            
+            withContext(Dispatchers.IO) {
+                val client = OkHttpClient()
+                
+                val resourcesList = mutableListOf<Map<String, String>>()
+                try {
+                    val request = Request.Builder()
+                        .url("$hostUrl/api/mcp/resources")
+                        .build()
+                        
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val bodyText = response.body?.string() ?: ""
+                            val json = JSONObject(bodyText)
+                            val array = json.optJSONArray("resources")
+                            if (array != null) {
+                                for (i in 0 until array.length()) {
+                                    val obj = array.getJSONObject(i)
+                                    resourcesList.add(mapOf(
+                                        "name" to obj.optString("name", ""),
+                                        "uri" to obj.optString("uri", ""),
+                                        "description" to obj.optString("description", "")
+                                    ))
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("MCP_CLIENT", "Failed to load resources: ${e.message}")
+                }
+                
+                val toolsList = mutableListOf<Map<String, String>>()
+                var fetchSuccess = false
+                var errorMsg = ""
+                try {
+                    val request = Request.Builder()
+                        .url("$hostUrl/api/mcp/tools")
+                        .build()
+                        
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            fetchSuccess = true
+                            val bodyText = response.body?.string() ?: ""
+                            val json = JSONObject(bodyText)
+                            val array = json.optJSONArray("tools")
+                            if (array != null) {
+                                for (i in 0 until array.length()) {
+                                    val obj = array.getJSONObject(i)
+                                    toolsList.add(mapOf(
+                                        "name" to obj.optString("name", ""),
+                                        "description" to obj.optString("description", "")
+                                    ))
+                                }
+                            }
+                        } else {
+                            errorMsg = "HTTP error code: ${response.code}"
+                        }
+                    }
+                } catch (e: Exception) {
+                    errorMsg = e.localizedMessage ?: "Connection refused"
+                }
+                
+                _remoteMcpResources.value = resourcesList
+                _remoteMcpTools.value = toolsList
+                
+                if (fetchSuccess) {
+                    _remoteMcpStatus.value = "Connected"
+                    _remoteMcpLog.value = "Successfully synchronized with remote MCP server!\n" +
+                            "Located ${toolsList.size} operational Tools and ${resourcesList.size} data Resources.\n" +
+                            "Ready to execute coherence calls."
+                    logDao.insertLog(SystemLog(tag = "MCP", message = "Paired with remote MCP server. Tools synchronized: ${toolsList.size}", level = "GOOD"))
+                } else {
+                    _remoteMcpStatus.value = "Error"
+                    _remoteMcpLog.value = "Failed to sync remote MCP nodes:\n$errorMsg\n\nEnsure your local Flask backend ('node.py') is running and is reachable."
+                    logDao.insertLog(SystemLog(tag = "MCP", message = "Remote MCP sync failed: $errorMsg", level = "WARN"))
+                }
+            }
+        }
+    }
+
+    fun callRemoteMcpTool(toolName: String, minerAddress: String = "@anonymous_quantum_miner") {
+        viewModelScope.launch {
+            _remoteMcpLog.value = "Triggering remote MCP Tool '$toolName' on backend server..."
+            
+            val rawUrl = _customBaseUrl.value.trim()
+            val hostUrl = when {
+                rawUrl.endsWith("/v1/") -> rawUrl.substring(0, rawUrl.length - 4)
+                rawUrl.endsWith("/v1") -> rawUrl.substring(0, rawUrl.length - 3)
+                rawUrl.endsWith("/") -> rawUrl.substring(0, rawUrl.length - 1)
+                else -> rawUrl
+            }
+            
+            withContext(Dispatchers.IO) {
+                try {
+                    val client = OkHttpClient()
+                    
+                    val payload = JSONObject()
+                    payload.put("name", toolName)
+                    val arguments = JSONObject()
+                    if (toolName == "mine_block") {
+                        arguments.put("miner_id", minerAddress)
+                    } else if (toolName == "quantum_calculate") {
+                        arguments.put("binary", "11010111")
+                    }
+                    payload.put("arguments", arguments)
+                    
+                    val mediaType = "application/json; charset=utf-8".toMediaType()
+                    val body = payload.toString().toRequestBody(mediaType)
+                    
+                    val request = Request.Builder()
+                        .url("$hostUrl/api/mcp/tools/call")
+                        .post(body)
+                        .build()
+                        
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val bodyText = response.body?.string() ?: ""
+                            val json = JSONObject(bodyText)
+                            val contentArray = json.optJSONArray("content")
+                            var resultText = "Tool executed successfully but returned empty content."
+                            if (contentArray != null && contentArray.length() > 0) {
+                                resultText = contentArray.getJSONObject(0).optString("text", "")
+                            }
+                            
+                            _remoteMcpLog.value = "=== MCP TOOL EXECUTION SUCCESS ===\n\n$resultText"
+                            logDao.insertLog(SystemLog(tag = "MCP", message = "Executed remote tool '$toolName' successfully", level = "GOOD"))
+                            
+                            if (toolName == "mine_block" && resultText.contains("SUCCESSFULLY")) {
+                                val rewarded = 12.5
+                                val newBal = _cqaiBalance.value + rewarded
+                                _cqaiBalance.value = newBal
+                                prefs.edit().putFloat("cqai_balance", newBal.toFloat()).apply()
+                                
+                                walletDao.insertTransaction(
+                                    WalletTransaction(
+                                        sender = "REMOTE COHERENCE BLOCKCHAIN",
+                                        recipient = "Destiny Harris",
+                                        amount = rewarded,
+                                        note = "Mined Remote Block reward via PoQC"
+                                    )
+                                )
+                            }
+                        } else {
+                            val errText = response.body?.string() ?: "Unknown server error"
+                            _remoteMcpLog.value = "=== MCP TOOL EXECUTION ERROR ===\n\nCode: ${response.code}\nResponse: $errText"
+                            logDao.insertLog(SystemLog(tag = "MCP", message = "Remote tool '$toolName' call failed with code ${response.code}", level = "WARN"))
+                        }
+                    }
+                } catch (e: Exception) {
+                    val errText = e.localizedMessage ?: "Failed to connect"
+                    _remoteMcpLog.value = "=== MCP TOOL EXECUTION FAILURE ===\n\nException: $errText\n\nEnsure your local backend server is running."
+                    logDao.insertLog(SystemLog(tag = "MCP", message = "Remote tool '$toolName' failed: $errText", level = "WARN"))
+                }
+            }
         }
     }
 

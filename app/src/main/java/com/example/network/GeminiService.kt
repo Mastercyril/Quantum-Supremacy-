@@ -200,6 +200,27 @@ object GeminiService {
     }
 
     /**
+     * 5b. General Content Generation (gemini-3.5-flash)
+     */
+    suspend fun generateContent(prompt: String, systemInstruction: String = ""): String {
+        val payload = JSONObject().apply {
+            put("contents", JSONArray().put(JSONObject().apply {
+                put("parts", JSONArray().put(JSONObject().apply {
+                    put("text", prompt)
+                }))
+            }))
+            if (systemInstruction.isNotEmpty()) {
+                put("systemInstruction", JSONObject().apply {
+                    put("parts", JSONArray().put(JSONObject().apply {
+                        put("text", systemInstruction)
+                    }))
+                })
+            }
+        }
+        return executeGenerateContent("gemini-3.5-flash", payload)
+    }
+
+    /**
      * 6. Google Search Grounding (gemini-3.5-flash)
      */
     suspend fun generateWithSearch(prompt: String, systemInstruction: String): String {

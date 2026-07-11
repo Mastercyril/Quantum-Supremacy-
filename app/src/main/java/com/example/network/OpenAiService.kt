@@ -74,7 +74,8 @@ object OpenAiClient {
     fun streamChatCompletions(
         apiKey: String,
         model: String,
-        messages: List<MessageDto>
+        messages: List<MessageDto>,
+        baseUrl: String = "https://api.openai.com/"
     ): Flow<String> = flow {
         val json = JSONObject()
         json.put("model", model)
@@ -92,8 +93,16 @@ object OpenAiClient {
 
         val mediaType = "application/json; charset=utf-8".toMediaType()
         val requestBody = json.toString().toRequestBody(mediaType)
+        
+        val cleanBaseUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
+        val fullUrl = if (cleanBaseUrl.contains("v1")) {
+            if (cleanBaseUrl.endsWith("v1/")) "${cleanBaseUrl}chat/completions" else "${cleanBaseUrl}/chat/completions"
+        } else {
+            "${cleanBaseUrl}v1/chat/completions"
+        }
+
         val request = Request.Builder()
-            .url("https://api.openai.com/v1/chat/completions")
+            .url(fullUrl)
             .header("Authorization", "Bearer $apiKey")
             .post(requestBody)
             .build()

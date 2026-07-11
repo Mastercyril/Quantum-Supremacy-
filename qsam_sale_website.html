@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QSAM — Quantum Coherent Blockchain Ecosystem</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        cyberCyan: '#00F5FF',
+                        cyberGreen: '#39FF14',
+                        cyberPink: '#FF007F',
+                        cyberDark: '#040B11',
+                        cyberSurface: '#08141F',
+                        cyberGray: '#102538'
+                    },
+                    fontFamily: {
+                        mono: ['Courier New', 'Courier', 'monospace'],
+                        sans: ['Segoe UI', 'Roboto', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes pulse-cyan {
+            0%, 100% { box-shadow: 0 0 15px rgba(0, 245, 255, 0.2); }
+            50% { box-shadow: 0 0 30px rgba(0, 245, 255, 0.6); }
+        }
+        @keyframes pulse-green {
+            0%, 100% { box-shadow: 0 0 10px rgba(57, 255, 20, 0.1); }
+            50% { box-shadow: 0 0 25px rgba(57, 255, 20, 0.4); }
+        }
+        .animate-cyan-pulse {
+            animation: pulse-cyan 3s infinite ease-in-out;
+        }
+        .animate-green-pulse {
+            animation: pulse-green 4s infinite ease-in-out;
+        }
+        .cyber-grid {
+            background-size: 40px 40px;
+            background-image: linear-gradient(to right, rgba(0, 245, 255, 0.03) 1px, transparent 1px),
+                              linear-gradient(to bottom, rgba(0, 245, 255, 0.03) 1px, transparent 1px);
+        }
+    </style>
+</head>
+<body class="bg-cyberDark text-gray-200 font-sans selection:bg-cyberCyan selection:text-black">
+
+    <!-- Cyber-Grid Background overlay -->
+    <div class="fixed inset-0 cyber-grid pointer-events-none z-0"></div>
+
+    <!-- Header Navigation -->
+    <header class="relative z-10 border-b border-cyberCyan/10 bg-cyberDark/80 backdrop-blur-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded border border-cyberCyan flex items-center justify-center bg-cyberCyan/10">
+                    <span class="text-cyberCyan font-bold font-mono text-xl">Ω</span>
+                </div>
+                <div>
+                    <h1 class="text-white font-mono font-bold tracking-widest text-lg">QSAM NETWORK</h1>
+                    <p class="text-xs text-cyberCyan font-mono">QUANTUM BITCOIN PROTOCOL</p>
+                </div>
+            </div>
+            <nav class="hidden md:flex space-x-8 font-mono text-xs tracking-wider">
+                <a href="#about" class="text-gray-400 hover:text-cyberCyan transition">01// SPECIFICATIONS</a>
+                <a href="#poqc" class="text-gray-400 hover:text-cyberGreen transition">02// POQC CONSENSUS</a>
+                <a href="#presale" class="text-gray-400 hover:text-cyberPink transition">03// INVESTOR_PORTAL</a>
+                <a href="#mcp" class="text-gray-400 hover:text-cyberCyan transition">04// MCP_PAIRING</a>
+            </nav>
+            <div>
+                <a href="#presale" class="inline-block px-5 py-2.5 border border-cyberCyan bg-cyberCyan/10 hover:bg-cyberCyan hover:text-black text-cyberCyan font-mono font-bold text-xs rounded transition uppercase tracking-widest">
+                    Buy QSAM Tokens
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Banner & Real-Time Stats -->
+    <section class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 lg:py-24">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+            <div class="lg:col-span-7">
+                <div class="inline-flex items-center space-x-2 px-3 py-1 bg-cyberCyan/10 border border-cyberCyan/30 rounded-full text-cyberCyan font-mono text-xs mb-6">
+                    <span class="w-2 h-2 rounded-full bg-cyberCyan animate-pulse"></span>
+                    <span>QSAM CORE NODE v1.4.2 ACTIVE ON GITHUB</span>
+                </div>
+                <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold text-white tracking-tight leading-none mb-6">
+                    The World’s First <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyberCyan to-cyberGreen">Quantum Coherent</span> Blockchain
+                </h1>
+                <p class="text-gray-400 text-lg mb-8 leading-relaxed max-w-2xl">
+                    QSAM (Quantum Bitcoin) secures global micro-transactions with atomic state signatures. Replacing energy-wasteful hashing with standard Proof-of-Quantum-Coherence (PoQC), miners secure blocks by maintaining simulated quantum phase-alignment.
+                </p>
+                <div class="flex flex-wrap gap-4">
+                    <a href="#presale" class="px-8 py-4 bg-gradient-to-r from-cyberCyan to-cyberGreen text-black font-mono font-bold text-sm tracking-widest rounded shadow-lg shadow-cyberCyan/20 hover:scale-[1.02] transition">
+                        GET PRESALE TOKENS
+                    </a>
+                    <a href="#mcp" class="px-8 py-4 border border-gray-700 bg-cyberSurface hover:border-cyberCyan text-white font-mono font-bold text-sm tracking-widest rounded transition">
+                        RUN NODE CLI
+                    </a>
+                </div>
+            </div>
+
+            <!-- Interactive Terminal HUD -->
+            <div class="lg:col-span-5 bg-cyberSurface border border-cyberCyan/20 rounded-lg p-6 animate-cyan-pulse">
+                <div class="flex items-center justify-between border-b border-cyberCyan/10 pb-4 mb-4">
+                    <div class="flex items-center space-x-2">
+                        <span class="w-3 h-3 rounded-full bg-red-500"></span>
+                        <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
+                        <span class="w-3 h-3 rounded-full bg-green-500"></span>
+                    </div>
+                    <span class="text-xs text-cyberCyan font-mono">COHERENCE_HUD_LOGGER</span>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div class="bg-cyberDark/60 p-3 rounded border border-cyberCyan/5">
+                        <p class="text-xs text-cyberCyan font-mono">NETWORK STATUS</p>
+                        <p class="text-lg font-bold text-white font-mono" id="hud-status">STANDBY</p>
+                    </div>
+                    <div class="bg-cyberDark/60 p-3 rounded border border-cyberCyan/5">
+                        <p class="text-xs text-cyberGreen font-mono">BLOCKHEIGHT</p>
+                        <p class="text-lg font-bold text-white font-mono" id="hud-height">#8,409</p>
+                    </div>
+                    <div class="bg-cyberDark/60 p-3 rounded border border-cyberCyan/5">
+                        <p class="text-xs text-cyberCyan font-mono">QUBITS SIMULATED</p>
+                        <p class="text-lg font-bold text-white font-mono">1,024 QB</p>
+                    </div>
+                    <div class="bg-cyberDark/60 p-3 rounded border border-cyberCyan/5">
+                        <p class="text-xs text-cyberGreen font-mono">ACTIVE MINERS</p>
+                        <p class="text-lg font-bold text-white font-mono" id="hud-miners">128</p>
+                    </div>
+                </div>
+
+                <div class="bg-cyberDark text-cyberGreen font-mono text-xs p-4 rounded h-32 overflow-y-auto" id="terminal-console">
+                    <p class="text-gray-500">[SYSTEM] Pairing standby... connecting to local node.py</p>
+                    <p class="text-cyberCyan">&gt; QSAM core daemon initialized.</p>
+                    <p class="text-cyberCyan">&gt; PoQC miner starting on thread pool...</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Algorithm explanation & specs -->
+    <section id="about" class="relative z-10 border-t border-cyberCyan/10 bg-cyberSurface/40 py-20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-cyberCyan font-mono text-sm tracking-widest uppercase mb-3">// TECHNICAL PROTOCOL</h2>
+                <h3 class="text-3xl sm:text-4xl font-bold text-white mb-4">Proof-of-Quantum-Coherence</h3>
+                <p class="text-gray-400">
+                    Traditional blockchains burn megawatts computing useless SHA-256 cycles. QSAM uses simulated quantum entanglements to formulate a cryptographically hard coherence puzzle.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- Card 1 -->
+                <div class="bg-cyberSurface border border-cyberCyan/10 p-6 rounded hover:border-cyberCyan/40 transition">
+                    <div class="w-12 h-12 rounded bg-cyberCyan/10 flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-cyberCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    </div>
+                    <h4 class="text-lg font-bold text-white mb-3">Instant Micro-Settlements</h4>
+                    <p class="text-gray-400 text-sm leading-relaxed">
+                        Through atomic phase-lock channels, transactions are cleared in sub-second timelines. Perfect for direct hardware micro-payments, IoT sensors, and high-speed AI trading bots.
+                    </p>
+                </div>
+                <!-- Card 2 -->
+                <div class="bg-cyberSurface border border-cyberGreen/10 p-6 rounded hover:border-cyberGreen/40 transition">
+                    <div class="w-12 h-12 rounded bg-cyberGreen/10 flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-cyberGreen" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                    </div>
+                    <h4 class="text-lg font-bold text-white mb-3">Quantum Resistance</h4>
+                    <p class="text-gray-400 text-sm leading-relaxed">
+                        Secured with post-quantum lattice-based signature algorithms, protecting your ledger and assets from next-generation supercomputers.
+                    </p>
+                </div>
+                <!-- Card 3 -->
+                <div class="bg-cyberSurface border border-cyberCyan/10 p-6 rounded hover:border-cyberCyan/40 transition">
+                    <div class="w-12 h-12 rounded bg-cyberCyan/10 flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-cyberCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+                    </div>
+                    <h4 class="text-lg font-bold text-white mb-3">Decentralized MCP Integration</h4>
+                    <p class="text-gray-400 text-sm leading-relaxed">
+                        The QSAM protocol natively exposes Model Context Protocol (MCP) tool schemas. AI agents can mine blocks, query transaction parameters, and sign payouts on your behalf.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Interactive Presale purchase Calculator Portal -->
+    <section id="presale" class="relative z-10 py-20 bg-cyberDark">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+                
+                <div class="lg:col-span-6">
+                    <h2 class="text-cyberPink font-mono text-sm tracking-widest uppercase mb-3">// QSAM PRESALE PORTAL</h2>
+                    <h3 class="text-4xl font-bold text-white mb-6">QSAM Token Sale Launch</h3>
+                    <p class="text-gray-400 mb-6 leading-relaxed">
+                        Be an early investor in the quantum blockchain revolution. Tokens purchased during the presale are immediately minted on your connected CQAI wallet address, compatible with the QSAM Android Mobile App.
+                    </p>
+
+                    <!-- Progress Bar -->
+                    <div class="bg-cyberGray p-6 rounded border border-cyberPink/10 mb-8">
+                        <div class="flex justify-between items-center mb-3">
+                            <span class="text-sm font-mono text-cyberPink">PRESALE PROGRESS</span>
+                            <span class="text-sm font-bold text-white font-mono">64.8% SOLD</span>
+                        </div>
+                        <div class="w-full bg-cyberDark rounded-full h-3 overflow-hidden border border-cyberPink/20">
+                            <div class="bg-gradient-to-r from-cyberPink to-cyberCyan h-full rounded-full" style="width: 64.8%"></div>
+                        </div>
+                        <div class="flex justify-between items-center mt-3 text-xs text-gray-400 font-mono">
+                            <span>RAISED: $324,050 USD</span>
+                            <span>HARDCAP: $500,000 USD</span>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center space-x-6 text-sm text-gray-400 font-mono">
+                        <div>
+                            <span class="block text-white text-lg font-bold">1 QSAM</span>
+                            <span>= $0.050 USD</span>
+                        </div>
+                        <div class="h-8 w-px bg-gray-800"></div>
+                        <div>
+                            <span class="block text-white text-lg font-bold">MIN INVESTMENT</span>
+                            <span>$10.00 USD</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Calculator Card -->
+                <div class="lg:col-span-6 bg-cyberSurface border border-cyberPink/20 rounded-lg p-8 animate-green-pulse">
+                    <h4 class="text-white font-mono font-bold text-lg mb-6 flex items-center">
+                        <span class="text-cyberPink mr-2">▶</span> PRESALE PURCHASING ENGINE
+                    </h4>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-mono text-cyberPink mb-2 uppercase">Amount in USD (United States Dollar)</label>
+                            <div class="relative">
+                                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-mono">$</span>
+                                <input type="number" id="usd-input" value="100" min="10" class="w-full bg-cyberDark border border-cyberPink/20 focus:border-cyberPink rounded p-3 pl-8 text-white font-mono outline-none" oninput="calculateTokens()">
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-center py-2">
+                            <span class="text-cyberPink font-bold text-xl">⇩</span>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-mono text-cyberCyan mb-2 uppercase">Estimated QSAM Yield</label>
+                            <div class="relative">
+                                <input type="text" id="qsam-output" value="2000" readonly class="w-full bg-cyberDark/50 border border-cyberCyan/10 rounded p-3 text-cyberCyan font-mono font-bold outline-none">
+                                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-cyberCyan font-mono font-bold">QSAM</span>
+                            </div>
+                        </div>
+
+                        <div class="p-4 bg-cyberDark/60 rounded border border-cyberCyan/10 text-xs font-mono leading-relaxed text-gray-400">
+                            🔒 Fast and secure token emission directly handled via connected CQAI Smart Contracts. No lockup period applies to initial presale slots.
+                        </div>
+
+                        <button onclick="simulatePurchase()" class="w-full py-4 bg-gradient-to-r from-cyberPink to-cyberCyan text-black font-mono font-bold text-sm tracking-widest rounded shadow-lg shadow-cyberPink/10 hover:scale-[1.01] transition uppercase">
+                            EXECUTE SECURE PURCHASE
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- MCP Pairing Guidelines Section -->
+    <section id="mcp" class="relative z-10 py-20 border-t border-cyberCyan/10 bg-cyberSurface/20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-cyberCyan font-mono text-sm tracking-widest uppercase mb-3">// AGENT INTEGRATION</h2>
+                <h3 class="text-3xl font-bold text-white mb-4">Pair with your Android Companion</h3>
+                <p class="text-gray-400">
+                    Your QSAM Android mobile app integrates directly with the running blockchain node. Pair them using your custom backend tunnel address.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+                <!-- Guide -->
+                <div class="space-y-6">
+                    <div class="flex space-x-4">
+                        <div class="w-8 h-8 rounded-full bg-cyberCyan/10 border border-cyberCyan flex items-center justify-center font-mono font-bold text-cyberCyan text-sm shrink-0">1</div>
+                        <div>
+                            <h4 class="text-white font-mono font-bold text-sm mb-1 uppercase">Retrieve your Backend Tunnel</h4>
+                            <p class="text-gray-400 text-sm leading-relaxed">
+                                Deploy your `node.py` Flask backend locally or on a cloud host (Render, Gunicorn). Obtain your base URL (e.g., <code class="bg-cyberDark px-1 text-cyberCyan rounded font-mono">https://qsam-node.render.com</code>).
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex space-x-4">
+                        <div class="w-8 h-8 rounded-full bg-cyberCyan/10 border border-cyberCyan flex items-center justify-center font-mono font-bold text-cyberCyan text-sm shrink-0">2</div>
+                        <div>
+                            <h4 class="text-white font-mono font-bold text-sm mb-1 uppercase">Configure the Companion App</h4>
+                            <p class="text-gray-400 text-sm leading-relaxed">
+                                Open your QSAM Android App, tap the <code class="bg-cyberDark px-1 text-cyberCyan rounded font-mono">⚙ CONFIG</code> tab, and paste your URL into the "CUSTOM BACKEND / TUNNEL HOST" input.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex space-x-4">
+                        <div class="w-8 h-8 rounded-full bg-cyberCyan/10 border border-cyberCyan flex items-center justify-center font-mono font-bold text-cyberCyan text-sm shrink-0">3</div>
+                        <div>
+                            <h4 class="text-white font-mono font-bold text-sm mb-1 uppercase">Synchronize and Mine Blocks</h4>
+                            <p class="text-gray-400 text-sm leading-relaxed">
+                                Navigate to <code class="bg-cyberDark px-1 text-cyberCyan rounded font-mono">🌍 REMOTE MCP NETWORK</code>, tap <code class="bg-cyberDark px-1 text-cyberGreen rounded font-mono">📡 SYNCHRONIZE</code>, and select any active MCP tool to query ledger state or mine standard blocks!
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Code box -->
+                <div class="bg-cyberDark border border-cyberCyan/10 rounded-lg p-6">
+                    <p class="text-xs font-mono text-cyberCyan mb-4">// DEPLOY NODE DAEMON ON RENDER OR UBUNTU</p>
+                    <pre class="text-cyberGreen font-mono text-xs overflow-x-auto space-y-2 leading-relaxed">
+<span># Install dependencies</span>
+<span>$ pip install -r requirements.txt</span>
+<span></span>
+<span># Start Flask blockchain backend</span>
+<span>$ gunicorn -w 4 -b 0.0.0.0:5000 node:app</span>
+<span></span>
+<span># Sync Verification Endpoint</span>
+<span>$ curl http://localhost:5000/api/mcp/tools</span>
+                    </pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="relative z-10 border-t border-cyberCyan/10 bg-cyberDark py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between">
+            <div class="flex items-center space-x-3 mb-6 md:mb-0">
+                <span class="text-cyberCyan font-bold font-mono text-2xl">Ω</span>
+                <span class="text-gray-400 font-mono text-xs">© 2026 QSAM Blockchain Protocol Ltd. MIT License.</span>
+            </div>
+            <div class="flex space-x-6 text-xs font-mono text-gray-400">
+                <a href="https://github.com" class="hover:text-cyberCyan transition">GITHUB REPO</a>
+                <a href="#about" class="hover:text-cyberGreen transition">WHITEPAPER</a>
+                <a href="#presale" class="hover:text-cyberPink transition">SMART CONTRACTS</a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Interactive JS scripts -->
+    <script>
+        function calculateTokens() {
+            const usd = parseFloat(document.getElementById('usd-input').value) || 0;
+            const price = 0.05;
+            const tokens = usd / price;
+            document.getElementById('qsam-output').value = tokens.toLocaleString('en-US', {maximumFractionDigits: 2});
+        }
+
+        function simulatePurchase() {
+            const usd = parseFloat(document.getElementById('usd-input').value) || 0;
+            if (usd < 10) {
+                alert("Minimum investment is $10 USD. Coherence threshold required.");
+                return;
+            }
+            const tokens = usd / 0.05;
+            alert(`SUCCESSFUL SIMULATED PURCHASE!\n\nInvested: $${usd.toLocaleString()} USD\nYield: ${tokens.toLocaleString()} QSAM tokens emitted to your secure companion address.\n\nSync your companion mobile app config to view your updated live balance.`);
+        }
+
+        // Live stats polling from local node.py if available
+        async function pollLocalStats() {
+            const consoleBox = document.getElementById('terminal-console');
+            const statusBox = document.getElementById('hud-status');
+            const heightBox = document.getElementById('hud-height');
+            const minersBox = document.getElementById('hud-miners');
+
+            try {
+                // Try polling localhost first as a fallback check
+                const response = await fetch('http://localhost:5000/api/mcp/resources');
+                if (response.ok) {
+                    const data = await response.json();
+                    statusBox.innerText = "ONLINE";
+                    statusBox.className = "text-lg font-bold text-cyberGreen font-mono";
+                    
+                    const p = document.createElement('p');
+                    p.className = 'text-cyberGreen';
+                    p.innerText = `> Succesfully pulled latest state metrics from node.py`;
+                    consoleBox.appendChild(p);
+                    consoleBox.scrollTop = consoleBox.scrollHeight;
+                }
+            } catch (e) {
+                // Keep simulation updating
+                setInterval(() => {
+                    const rand = Math.random();
+                    if (rand > 0.7) {
+                        const height = parseInt(heightBox.innerText.replace('#', '').replace(',', '')) + 1;
+                        heightBox.innerText = `#${height.toLocaleString()}`;
+                        
+                        const p = document.createElement('p');
+                        p.className = 'text-cyberGreen';
+                        p.innerText = `[INFO] ${new Date().toLocaleTimeString()} Mined block #${height} successfully via PoQC. Reward: 12.5 QSAM`;
+                        consoleBox.appendChild(p);
+                        consoleBox.scrollTop = consoleBox.scrollHeight;
+                    }
+                }, 4000);
+            }
+        }
+
+        window.onload = () => {
+            calculateTokens();
+            pollLocalStats();
+        };
+    </script>
+</body>
+</html>
